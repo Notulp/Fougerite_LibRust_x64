@@ -3,6 +3,7 @@
 #include <winsock2.h>
 #include <iostream>
 #include <string>
+#include <string_view>   
 #include <cstdint>
 #include <queue>
 #include <mutex>
@@ -10,6 +11,7 @@
 #include <conio.h>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 
 #include "steam/steam_gameserver.h"
 
@@ -34,7 +36,9 @@ std::thread g_InputThread;
 std::string g_CurrentInput; 
 
 rconpp::rcon_server* g_RconServer = nullptr;
-int g_ServerPort = 29015; 
+int g_GamePort = 29015; 
+int g_RconPort = 0;
+std::string g_RconPassword = "testing";
 std::string g_RconCaptureBuffer;
 bool g_IsCapturingRcon = false;
 std::mutex g_RconCaptureMutex;
@@ -153,37 +157,57 @@ void ConsoleInputWorker()
     }
 }
 
-std::string InterceptRconPassword()
+void CleanString(std::string& str) 
 {
-    std::ifstream file("rust_server_Data/cfg/server.cfg");
-    if (!file.is_open()) 
-    {
-        file.open("cfg/server.cfg");
-    }
+    str.erase(str.find_last_not_of(" \t\r\n") + 1);
+    str.erase(0, str.find_first_not_of(" \t\r\n"));
+}
 
-    if (file.is_open())
+void ParseCfgFile(const std::string& filePath) 
+{
+    std::ifstream file(filePath);
+    if (!file.is_open()) return;
+
+    std::string line;
+    while (std::getline(file, line)) 
     {
-        std::string line;
-        while (std::getline(file, line))
+        CleanString(line);
+        if (line.empty() || line[0] == '#') continue;
+
+        std::stringstream ss(line);
+        std::string key, val;
+        ss >> key;
+        
+        std::size_t pos = line.find(key);
+        if (pos != std::string::npos) 
         {
-            if (line.find("rcon.password") != std::string::npos)
-            {
-                std::size_t firstQuote = line.find('\"');
-                std::size_t lastQuote = line.rfind('\"');
-                if (firstQuote != std::string::npos && lastQuote != std::string::npos && firstQuote != lastQuote)
-                {
-                    return line.substr(firstQuote + 1, lastQuote - firstQuote - 1);
-                }
-                
-                std::stringstream ss(line);
-                std::string dummy, pass;
-                ss >> dummy >> pass;
-                if (!pass.empty()) return pass;
-            }
+            val = line.substr(pos + key.length());
+        }
+        
+        CleanString(val);
+        if (!val.empty() && val.front() == '\"') val.erase(0, 1);
+        if (!val.empty() && val.back() == '\"') val.pop_back();
+        
+        if (key == "server.port") 
+        {
+            int p = atoi(val.c_str());
+            if (p > 0) g_GamePort = p;
+            std::cout << "[LibRust x64] Game Port set to " << g_GamePort << "\n";
+        } 
+        else if (key == "rcon.port") 
+        {
+            int p = atoi(val.c_str());
+            if (p > 0) g_RconPort = p;
+            std::cout << "[LibRust x64] RCON Port set to " << g_RconPort << "\n";
+        } 
+        else if (key == "rcon.password") 
+        {
+            if (!val.empty()) g_RconPassword = val;
+            std::cout << "[LibRust x64] RCON Password found " << "\n";
         }
     }
-    return "testing"; 
 }
+
 
 EXPORT int Initialize(char** args, int numargs)
 {
@@ -197,13 +221,45 @@ EXPORT int Initialize(char** args, int numargs)
     
     SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
 
+    WSADATA wsaData;
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
+
+    std::string cfgPath = "";
     for (int i = 0; i < numargs; ++i)
     {
         if (strcmp(args[i], "-port") == 0 && (i + 1) < numargs)
         {
-            g_ServerPort = atoi(args[i + 1]);
-            break;
+            g_GamePort = atoi(args[i + 1]);
         }
+        if (strcmp(args[i], "-cfg") == 0 && (i + 1) < numargs)
+        {
+            cfgPath = args[i + 1];
+        }
+    }
+
+    // fallback mapping via execution directory if parameters get cut off
+    if (!cfgPath.empty()) 
+    {
+        char exePath[MAX_PATH];
+        GetModuleFileNameA(NULL, exePath, MAX_PATH);
+        std::string exeDir = exePath;
+        std::size_t lastSlash = exeDir.find_last_of("\\/");
+        if (lastSlash != std::string::npos) 
+        {
+            exeDir = exeDir.substr(0, lastSlash + 1);
+        }
+        std::string fullPath = exeDir + cfgPath;
+        ParseCfgFile(fullPath);
+    }
+
+    if (g_RconPort == 0) 
+    {
+        g_RconPort = g_GamePort + 1;
+        std::cout << "[LibRust x64] RCON Port not specified, defaulting to " << g_RconPort << "\n";
+    }
+    else
+    {
+        std::cout << "[LibRust x64] RCON Port set to " << g_RconPort << "\n";
     }
 
     g_IsRunning = true;
@@ -226,6 +282,7 @@ EXPORT void Shutdown()
         delete g_RconServer; 
         g_RconServer = nullptr;
     }
+    WSACleanup();
 }
 
 EXPORT void Cycle()
@@ -308,9 +365,13 @@ EXPORT void RCON_SetupCallbacks(rconFuncAuth auth, rconFuncCommand command)
 
     if (g_RconServer) return;
 
-    std::string pass = InterceptRconPassword();
+    g_RconServer = new rconpp::rcon_server("0.0.0.0", g_RconPort, g_RconPassword);
 
-    g_RconServer = new rconpp::rcon_server("0.0.0.0", g_ServerPort, pass);
+    std::cout << "[LibRust x64] rconpp instance created. Socket Listening: " << (g_RconServer->online ? "SUCCESS" : "FAILED") << "\n";
+    if (!g_RconServer->online)
+    {
+        std::cout << "[LibRust x64] Socket Bind Error Code: " << WSAGetLastError() << "\n";
+    }
 
     g_RconServer->on_command = [](const rconpp::client_command& cmd) -> std::string {
         if (g_RconCommand)
@@ -331,10 +392,8 @@ EXPORT void RCON_SetupCallbacks(rconFuncAuth auth, rconFuncCommand command)
         }
         return "Engine core command pipeline unavailable.\n";
     };
-    
-    std::cout << "[LibRust x64] Online: " << g_RconServer->online << "\n";
 
-    std::cout << "[LibRust x64] RconPP listener attached automatically on port " << g_ServerPort << "\n";
+    std::cout << "[LibRust x64] rconpp pipeline mapped on TCP port " << g_RconPort << "\n";
 }
 
 EXPORT void FreezeMonitor_On() {}
@@ -350,7 +409,10 @@ EXPORT void SetTitleOfConsole(const char* log)
 
 EXPORT bool Steam_ServerStartup(int port, int protocol)
 {
-    bool result = SteamGameServer_Init(0, 8766, port, 27015, eServerModeAuthenticationAndSecure, "1.0.0.0");
+    char versionString[32];
+    sprintf_s(versionString, "%d", protocol);
+
+    bool result = SteamGameServer_Init(0, 8766, port, 27015, eServerModeAuthenticationAndSecure, versionString);
     if (result)
     {
         g_pCallbacks = new CSteamCallbacks();
@@ -358,7 +420,7 @@ EXPORT bool Steam_ServerStartup(int port, int protocol)
         SteamGameServer()->SetProduct("rust");
         SteamGameServer()->SetGameDescription("Rust Legacy x64");
         SteamGameServer()->LogOnAnonymous();
-        std::cout << "[LibRust x64] SteamGameServer Initialized successfully.\n";
+        std::cout << "[LibRust x64] SteamGameServer Initialized with Protocol " << versionString << " successfully.\n";
     }
     else
     {
