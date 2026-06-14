@@ -1,0 +1,157 @@
+#pragma once
+
+#ifdef _WIN32
+#include <winsock2.h>
+#else
+#include <sys/types.h>
+#include <sys/socket.h>
+#endif
+#include <cstdint>
+
+
+#include <optional>
+
+#include "export.h"
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace rconpp {
+
+// Connection constants.
+constexpr int DEFAULT_TIMEOUT = 4; // In Seconds.
+constexpr int MAX_RETRIES_TO_RECEIVE_INFO = 5;
+constexpr int HEARTBEAT_TIME = 30;
+constexpr uint8_t MAX_AUTHENTICATION_ATTEMPTS = 3;
+
+// Packet constants.
+constexpr int MIN_PACKET_SIZE = 10;
+constexpr int MIN_PACKET_LENGTH = 14;
+constexpr int MAX_PACKET_SIZE = 4096;
+constexpr int PACKET_SIZE_BYTES = 4; // The first x bytes of the packet to read for the packet size (usually the first 4 bytes)
+
+// Used for send/recv calls, as `signal(SIGPIPE, SIG_IGN);` seems to be ignored.
+#ifndef MSG_NOSIGNAL
+	#define MSG_NOSIGNAL 0
+#endif
+
+// INVALID_SOCKET doesn't exist on Linux/Unix (both platforms just return -1 on error), add this to avoid ifdef spam.
+#ifndef INVALID_SOCKET
+	#define INVALID_SOCKET -1
+#endif
+
+// Same as above.
+#ifndef SOCKET_ERROR
+	#define SOCKET_ERROR -1
+#endif
+
+// Windows uses uint64_t for sockets, whereas Linux/Unix uses int,
+// having this reduces the warnings and whatnot on Windows caused by converting them to int.
+#ifndef SOCKET_TYPE
+	#ifdef _WIN32
+		#define SOCKET_TYPE SOCKET
+	#else
+		#define SOCKET_TYPE int
+	#endif
+#endif
+
+
+
+enum data_type {
+	/**
+	 * @brief A response to a SERVERDATA_EXECOMMAND packet.
+	 *
+	 * @note You should **ALWAYS** send this packet upon an SERVERDATA_EXECCOMMAND packet.
+	 * Whilst rcon++ will handle no response safely, other libraries may not.
+	 */
+	SERVERDATA_RESPONSE_VALUE = 0,
+
+	/**
+	 * @brief A command packet.
+	 *
+	 * @note The server *may* send a `SERVERDATA_RESPONSE_VALUE` packet if the request was successful.
+	 * However, The server can (but shouldn't) choose to not send a packet back if it only processes the packet and does nothing else.
+	 * You should take this into account by either not using the callback or by turning feedback off.
+	 */
+	SERVERDATA_EXECCOMMAND = 2,
+
+	/**
+	 * @brief A response to an authorisation packet.
+	 *
+	 * @warning If you are wishing to send this packet, you should only **EVER** send this as an empty packet.
+	 */
+	SERVERDATA_AUTH_RESPONSE = 2,
+
+	/**
+	 * @brief An authorisation packet.
+	 *
+	 * The server will send an empty `SERVERDATA_AUTH_RESPONSE` packet if the request was successful.
+	 */
+	SERVERDATA_AUTH = 3,
+};
+
+struct packet {
+	int length{-1};
+	int size{-1};
+	std::vector<char> data{};
+	bool server_responded{false};
+};
+
+struct response {
+	std::string data{};
+	bool server_responded{false};
+};
+
+enum error_type {
+	DISCONNECTED = 0,
+	BAD_FD = 1,
+	SHUTTING_DOWN = 2,
+};
+
+struct last_error {
+	error_type type_of_error{DISCONNECTED};
+	int error_code{0};
+};
+
+/**
+ * @brief Form a valid RCON packet.
+ *
+ * @param data The data to add to the packet.
+ * @param id The ID of the request.
+ * @param type The type of packet.
+ *
+ * @returns The packet data (as an array of chars) to send to a server.
+ */
+RCONPP_EXPORT packet form_packet(std::string_view data, int32_t id, int32_t type);
+
+/**
+ * @brief Turn the first 4 bytes of a buffer (which ideally a 32 bit int) into an integer.
+ *
+ * @param buffer The bytes to turn into an integer.
+ *
+ * @return The value of the 4 bytes.
+ */
+RCONPP_EXPORT int bit32_to_int(const std::vector<char>& buffer);
+
+/**
+ * @brief Turn the second lot of 4 bytes (bytes 4-7) of a buffer (which ideally a 32 bit int) into an integer.
+ *
+ * @param buffer The bytes to turn into an integer.
+ *
+ * @return The value of the 4 bytes.
+ */
+RCONPP_EXPORT int type_to_int(const std::vector<char>& buffer);
+
+/**
+ * @brief Converts the last error into a prev_error struct.
+ */
+RCONPP_EXPORT last_error get_last_error();
+
+/**
+ * @brief Reads the first 4 bytes of a packet to get the packet size (not to be mistaken with length).
+ *
+ * @return The size (not length) of the packet.
+ */
+RCONPP_EXPORT int read_packet_size(SOCKET_TYPE socket);
+
+} // namespace rconpp

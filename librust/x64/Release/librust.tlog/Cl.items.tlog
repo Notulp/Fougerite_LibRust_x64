@@ -1,1 +1,4 @@
 D:\Projects\NETPlatform\Visual Studio 2013\Fougerite_Steam_x64\Fougerite_x64\librust\dllmain.cpp;D:\Projects\NETPlatform\Visual Studio 2013\Fougerite_Steam_x64\Fougerite_x64\librust\x64\Release\dllmain.obj
+D:\Projects\NETPlatform\Visual Studio 2013\Fougerite_Steam_x64\Fougerite_x64\librust\rconpp\client.cpp;D:\Projects\NETPlatform\Visual Studio 2013\Fougerite_Steam_x64\Fougerite_x64\librust\x64\Release\client.obj
+D:\Projects\NETPlatform\Visual Studio 2013\Fougerite_Steam_x64\Fougerite_x64\librust\rconpp\server.cpp;D:\Projects\NETPlatform\Visual Studio 2013\Fougerite_Steam_x64\Fougerite_x64\librust\x64\Release\server.obj
+D:\Projects\NETPlatform\Visual Studio 2013\Fougerite_Steam_x64\Fougerite_x64\librust\rconpp\utilities.cpp;D:\Projects\NETPlatform\Visual Studio 2013\Fougerite_Steam_x64\Fougerite_x64\librust\x64\Release\utilities.obj
