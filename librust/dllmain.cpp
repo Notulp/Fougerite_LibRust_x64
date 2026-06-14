@@ -208,7 +208,6 @@ void ParseCfgFile(const std::string& filePath)
     }
 }
 
-
 EXPORT int Initialize(char** args, int numargs)
 {
     if (!AttachConsole(ATTACH_PARENT_PROCESS))
@@ -237,7 +236,6 @@ EXPORT int Initialize(char** args, int numargs)
         }
     }
 
-    // fallback mapping via execution directory if parameters get cut off
     if (!cfgPath.empty()) 
     {
         char exePath[MAX_PATH];
@@ -379,6 +377,7 @@ EXPORT void RCON_SetupCallbacks(rconFuncAuth auth, rconFuncCommand command)
             std::lock_guard<std::mutex> lock(g_RconCaptureMutex);
             g_RconCaptureBuffer.clear();
             g_IsCapturingRcon = true;
+            std::cout << "[LibRust x64] RCON Command: " << cmd.command << "\n";
 
             g_RconCommand(0, cmd.command.c_str());
 
@@ -403,7 +402,11 @@ EXPORT void SetTitleOfConsole(const char* log)
 {
     if (log) 
     {
-        SetConsoleTitleA(log);
+        int len = MultiByteToWideChar(CP_UTF8, 0, log, -1, NULL, 0);
+        wchar_t* wstr = new wchar_t[len];
+        MultiByteToWideChar(CP_UTF8, 0, log, -1, wstr, len);
+        SetConsoleTitleW(wstr);
+        delete[] wstr;
     }
 }
 
@@ -411,8 +414,8 @@ EXPORT bool Steam_ServerStartup(int port, int protocol)
 {
     char versionString[32];
     sprintf_s(versionString, "%d", protocol);
-
-    bool result = SteamGameServer_Init(0, 8766, port, 27015, eServerModeAuthenticationAndSecure, versionString);
+    
+    bool result = SteamGameServer_Init(0, 8766, port, g_RconPort, eServerModeAuthenticationAndSecure, versionString);
     if (result)
     {
         g_pCallbacks = new CSteamCallbacks();
