@@ -214,6 +214,16 @@ EXPORT int Initialize(char** args, int numargs)
     {
         AllocConsole();
     }
+
+    HWND hWnd = GetConsoleWindow();
+    if (hWnd)
+    {
+        HMENU hMenu = GetSystemMenu(hWnd, FALSE);
+        if (hMenu)
+        {
+            EnableMenuItem(hMenu, SC_CLOSE, MF_BYCOMMAND | MF_GRAYED);
+        }
+    }
     
     freopen_s((FILE**)stdin, "CONIN$", "r", stdin);
     freopen_s((FILE**)stdout, "CONOUT$", "w", stdout);
