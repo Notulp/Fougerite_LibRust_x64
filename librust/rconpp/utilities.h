@@ -32,85 +32,90 @@ constexpr int PACKET_SIZE_BYTES = 4; // The first x bytes of the packet to read 
 
 // Used for send/recv calls, as `signal(SIGPIPE, SIG_IGN);` seems to be ignored.
 #ifndef MSG_NOSIGNAL
-	#define MSG_NOSIGNAL 0
+    #define MSG_NOSIGNAL 0
 #endif
 
 // INVALID_SOCKET doesn't exist on Linux/Unix (both platforms just return -1 on error), add this to avoid ifdef spam.
 #ifndef INVALID_SOCKET
-	#define INVALID_SOCKET -1
+    #define INVALID_SOCKET -1
 #endif
 
 // Same as above.
 #ifndef SOCKET_ERROR
-	#define SOCKET_ERROR -1
+    #define SOCKET_ERROR -1
 #endif
 
 // Windows uses uint64_t for sockets, whereas Linux/Unix uses int,
 // having this reduces the warnings and whatnot on Windows caused by converting them to int.
 #ifndef SOCKET_TYPE
-	#ifdef _WIN32
-		#define SOCKET_TYPE SOCKET
-	#else
-		#define SOCKET_TYPE int
-	#endif
+    #ifdef _WIN32
+       #define SOCKET_TYPE SOCKET
+    #else
+       #define SOCKET_TYPE int
+    #endif
 #endif
 
 
 
 enum data_type {
-	/**
-	 * @brief A response to a SERVERDATA_EXECOMMAND packet.
-	 *
-	 * @note You should **ALWAYS** send this packet upon an SERVERDATA_EXECCOMMAND packet.
-	 * Whilst rcon++ will handle no response safely, other libraries may not.
-	 */
-	SERVERDATA_RESPONSE_VALUE = 0,
+    /**
+     * @brief A response to a SERVERDATA_EXECOMMAND packet.
+     *
+     * @note You should **ALWAYS** send this packet upon an SERVERDATA_EXECCOMMAND packet.
+     * Whilst rcon++ will handle no response safely, other libraries may not.
+     */
+    SERVERDATA_RESPONSE_VALUE = 0,
 
-	/**
-	 * @brief A command packet.
-	 *
-	 * @note The server *may* send a `SERVERDATA_RESPONSE_VALUE` packet if the request was successful.
-	 * However, The server can (but shouldn't) choose to not send a packet back if it only processes the packet and does nothing else.
-	 * You should take this into account by either not using the callback or by turning feedback off.
-	 */
-	SERVERDATA_EXECCOMMAND = 2,
+    /**
+     * @brief A command packet.
+     *
+     * @note The server *may* send a `SERVERDATA_RESPONSE_VALUE` packet if the request was successful.
+     * However, The server can (but shouldn't) choose to not send a packet back if it only processes the packet and does nothing else.
+     * You should take this into account by either not using the callback or by turning feedback off.
+     */
+    SERVERDATA_EXECCOMMAND = 2,
 
-	/**
-	 * @brief A response to an authorisation packet.
-	 *
-	 * @warning If you are wishing to send this packet, you should only **EVER** send this as an empty packet.
-	 */
-	SERVERDATA_AUTH_RESPONSE = 2,
+    /**
+     * @brief A response to an authorisation packet.
+     *
+     * @warning If you are wishing to send this packet, you should only **EVER** send this as an empty packet.
+     */
+    SERVERDATA_AUTH_RESPONSE = 2,
 
-	/**
-	 * @brief An authorisation packet.
-	 *
-	 * The server will send an empty `SERVERDATA_AUTH_RESPONSE` packet if the request was successful.
-	 */
-	SERVERDATA_AUTH = 3,
+    /**
+     * @brief An authorisation packet.
+     *
+     * The server will send an empty `SERVERDATA_AUTH_RESPONSE` packet if the request was successful.
+     */
+    SERVERDATA_AUTH = 3,
+
+    /**
+     * @brief Legacy Rust Background Console Log Packet.
+     */
+    SERVERDATA_CONSOLE_LOG = 4,
 };
 
 struct packet {
-	int length{-1};
-	int size{-1};
-	std::vector<char> data{};
-	bool server_responded{false};
+    int length{-1};
+    int size{-1};
+    std::vector<char> data{};
+    bool server_responded{false};
 };
 
 struct response {
-	std::string data{};
-	bool server_responded{false};
+    std::string data{};
+    bool server_responded{false};
 };
 
 enum error_type {
-	DISCONNECTED = 0,
-	BAD_FD = 1,
-	SHUTTING_DOWN = 2,
+    DISCONNECTED = 0,
+    BAD_FD = 1,
+    SHUTTING_DOWN = 2,
 };
 
 struct last_error {
-	error_type type_of_error{DISCONNECTED};
-	int error_code{0};
+    error_type type_of_error{DISCONNECTED};
+    int error_code{0};
 };
 
 /**

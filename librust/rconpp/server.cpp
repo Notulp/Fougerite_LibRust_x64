@@ -1,338 +1,362 @@
 #include <mutex>
 #include <csignal>
+#include <algorithm>
 #include "server.h"
-
 #include "utilities.h"
 
 rconpp::rcon_server::rcon_server(const std::string_view addr, const int _port, const std::string_view pass) : address(addr), port(_port), password(pass) {
 }
 
 rconpp::rcon_server::~rcon_server() {
-	if (on_log) {
-		on_log("RCON server is shutting down.");
-	}
+    if (on_log) {
+       on_log("RCON server is shutting down.");
+    }
 
-	// Set connected to false, meaning no requests can be attempted during shutdown.
-	online = false;
+    online = false;
+    terminating.notify_all();
 
-	terminating.notify_all();
-
-	// Safely disconnect all clients from server.
-	for(const auto& client : connected_clients) {
-		disconnect_client(client.first, false);
-	}
+    for(const auto& client : connected_clients) {
+       disconnect_client(client.first, false);
+    }
 
 #ifdef _WIN32
-	closesocket(sock);
-	WSACleanup();
+    closesocket(sock);
+    WSACleanup();
 #else
-	close(sock);
+    close(sock);
 #endif
-	if (accept_connections_runner.joinable()) {
-		accept_connections_runner.join();
-	}
+    if (accept_connections_runner.joinable()) {
+       accept_connections_runner.join();
+    }
 }
 
 bool rconpp::rcon_server::startup_server() {
 #ifdef _WIN32
-	// Initialize Winsock
-	WSADATA wsa_data;
-	int result = WSAStartup(MAKEWORD(2, 2), &wsa_data);
-	if (result != 0) {
-		on_log("WSAStartup failed. Error: " + std::to_string(result));
-		return false;
-	}
+    WSADATA wsa_data;
+    int result = WSAStartup(MAKEWORD(2, 2), &wsa_data);
+    if (result != 0) {
+       on_log("WSAStartup failed. Error: " + std::to_string(result));
+       return false;
+    }
 #else
-	signal(SIGPIPE, SIG_IGN);
+    signal(SIGPIPE, SIG_IGN);
 #endif
 
-	// Create new TCP socket.
-	sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
 #ifdef _WIN32
-	if (sock == INVALID_SOCKET) {
+    if (sock == INVALID_SOCKET) {
 #else
-	if (sock == -1) {
+    if (sock == -1) {
 #endif
-		const last_error err = get_last_error();
-		on_log("Failed to open socket [Error code: " + std::to_string(err.error_code) + "]!");
-		return false;
-	}
+       const last_error err = get_last_error();
+       on_log("Failed to open socket [Error code: " + std::to_string(err.error_code) + "]!");
+       return false;
+    }
 
-	sockaddr_in server{};
+    sockaddr_in server{};
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = INADDR_ANY;
+    server.sin_port = htons(port);
 
-	// Setup port, address, and family.
-	server.sin_family = AF_INET;
-	server.sin_addr.s_addr = INADDR_ANY;
-	server.sin_port = htons(port);
+    int allow = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&allow), sizeof(allow));
 
-	int allow = 1;
-	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&allow), sizeof(allow));
+    int status = bind(sock, reinterpret_cast<const sockaddr*>(&server), sizeof(server));
+    if (status == -1) return false;
 
-	// Connect to the socket and set the status of the connection.
-	int status = bind(sock, reinterpret_cast<const sockaddr*>(&server), sizeof(server));
+    status = listen(sock, SOMAXCONN);
+    if (status == -1) return false;
 
-	if (status == -1) {
-		return false;
-	}
-
-	status = listen(sock, SOMAXCONN);
-
-	if (status == -1) {
-		return false;
-	}
-
-	return true;
+    return true;
 }
 
 void rconpp::rcon_server::disconnect_client(const SOCKET_TYPE client_socket, const bool remove_after /*= true*/) {
-
 #ifdef _WIN32
-	closesocket(client_socket);
+    closesocket(client_socket);
 #else
-	close(client_socket);
+    close(client_socket);
 #endif
 
-	if (connected_clients.find(client_socket) == connected_clients.end())
-	{
-		on_log("Client [Socket: " + std::to_string(client_socket) + "] does not appear to be a connected client.");
-		return;
-	}
+    if (connected_clients.find(client_socket) == connected_clients.end()) {
+       on_log("Client [Socket: " + std::to_string(client_socket) + "] does not appear to be a connected client.");
+       return;
+    }
 
-	connected_client& client = connected_clients.at(client_socket);
+    connected_client& client = connected_clients.at(client_socket);
+    client.connected = false;
+    client.authenticated = false;
+    
+    on_log("Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + " | Socket: " + std::to_string(client_socket) + "] has been disconnected from the server.");
 
-	client.connected = false;
-	client.authenticated = false;
-	
-	on_log("Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + " | Socket: " + std::to_string(client_socket) + "] has been disconnected from the server.");
+    if (remove_after) {
+       {
+          while (!request_handlers_mutex.try_lock()) {
+             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+          }
+          request_handlers.erase(client_socket);
+          request_handlers_mutex.unlock();
+       }
+       remove_client(client_socket);
+    }
+}
 
-	if (remove_after) {
-		{
-			while (!request_handlers_mutex.try_lock()) {
-				std::this_thread::sleep_for(std::chrono::milliseconds(100));
-			}
+void rconpp::rcon_server::broadcast_log(const std::string& log) {
+    if (log.empty() || !online) return;
+    const size_t MAX_BODY_LEN = 4000;
 
-			request_handlers.erase(client_socket);
+    std::lock_guard<std::mutex> lock(connected_clients_mutex);
+    for (auto& pair : connected_clients) {
+        auto& client = pair.second;
+        if (client.authenticated) {
+            size_t offset = 0;
+            while (offset < log.length()) {
+                size_t chunkLen = min((size_t)MAX_BODY_LEN, log.length() - offset);
+                std::string chunk = log.substr(offset, chunkLen);
 
-			request_handlers_mutex.unlock();
-		}
-
-		remove_client(client_socket);
-	}
+                packet p1 = form_packet(chunk, 0, SERVERDATA_CONSOLE_LOG);
+                packet p2 = form_packet(chunk, client.auth_id, SERVERDATA_RESPONSE_VALUE);
+                
+                std::vector<char> combined;
+                combined.reserve(p1.length + p2.length);
+                combined.insert(combined.end(), p1.data.begin(), p1.data.end());
+                combined.insert(combined.end(), p2.data.begin(), p2.data.end());
+                
+                send(client.socket, combined.data(), combined.size(), MSG_NOSIGNAL);
+                offset += chunkLen;
+            }
+        }
+    }
 }
 
 void rconpp::rcon_server::read_packet(connected_client& client) {
-	const int packet_size = read_packet_size(client.socket);
+    const int packet_size = read_packet_size(client.socket);
 
-	if (packet_size == -1) {
-		const last_error err = get_last_error();
-		on_log("Failed to read packet size from Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + " | Error code: " + std::to_string(err.error_code) + "]!");
+    if (packet_size == -1) {
+       const last_error err = get_last_error();
+       on_log("Failed to read packet size from Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + " | Error code: " + std::to_string(err.error_code) + "]!");
+       if (err.type_of_error == DISCONNECTED) client.last_heartbeat = 0;
+       return;
+    }
 
-		// Since the client looks to have disconnected, we need to check their heartbeat immediately.
-		if (err.type_of_error == DISCONNECTED) {
-			client.last_heartbeat = 0;
-		}
+    if (packet_size < MIN_PACKET_SIZE) {
+       on_log("Packet size too small: " + std::to_string(packet_size));
+       return;
+    }
 
-		return;
-	}
+    std::vector<char> buffer{};
+    buffer.resize(packet_size);
 
-	// Silently ignore packet sizes bigger than -1 but smaller than MIN_PACKET_SIZE,
-	// which indicates it's a valid packet but not a valid size.
-	if (packet_size < MIN_PACKET_SIZE) {
-		on_log("Packet size too small: " + std::to_string(packet_size));
-		return;
-	}
+    if (recv(client.socket, buffer.data(), packet_size, MSG_NOSIGNAL) == -1) {
+       const last_error err = get_last_error();
+       on_log("Failed to receive the full packet from Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + " | Error code: " + std::to_string(err.error_code) + "]!");
+       if (err.type_of_error == DISCONNECTED) client.last_heartbeat = 0;
+       return;
+    }
 
-	std::vector<char> buffer{};
-	buffer.resize(packet_size);
+    client.last_heartbeat = time(nullptr);
 
-	if (recv(client.socket, buffer.data(), packet_size, MSG_NOSIGNAL) == -1) {
-		const last_error err = get_last_error();
-		on_log("Failed to receive the full packet from Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + " | Error code: " + std::to_string(err.error_code) + "]!");
+    std::string packet_data(&buffer[8], &buffer[buffer.size()-2]);
+    int id = bit32_to_int(buffer);
+    int type = type_to_int(buffer);
 
-		// Since the client looks to have disconnected, we need to check their heartbeat immediately.
-		if (err.type_of_error == DISCONNECTED) {
-			client.last_heartbeat = 0;
-		}
+    packet packet_to_send{};
 
-		return;
-	}
+    if (!client.authenticated) {
+       on_log("Client not authenticated, handling authentication.");
+       
+       if (packet_data == password) {
+          packet p1 = form_packet("", id, SERVERDATA_RESPONSE_VALUE);
+          packet p2 = form_packet("", id, SERVERDATA_AUTH_RESPONSE);
+          
+          std::vector<char> combined;
+          combined.reserve(p1.length + p2.length);
+          combined.insert(combined.end(), p1.data.begin(), p1.data.end());
+          combined.insert(combined.end(), p2.data.begin(), p2.data.end());
+          send(client.socket, combined.data(), combined.size(), MSG_NOSIGNAL);
 
-	// Client is talking to us, we don't need to send a heartbeat if we're being talked to.
-	client.last_heartbeat = time(nullptr);
+          client.authenticated = true;
+          client.auth_id = id;
+          on_log("Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "] has authenticated successfully!");
+       } else {
+          packet p1 = form_packet("", id, SERVERDATA_RESPONSE_VALUE);
+          packet p2 = form_packet("", -1, SERVERDATA_AUTH_RESPONSE);
+          
+          std::vector<char> combined;
+          combined.reserve(p1.length + p2.length);
+          combined.insert(combined.end(), p1.data.begin(), p1.data.end());
+          combined.insert(combined.end(), p2.data.begin(), p2.data.end());
+          send(client.socket, combined.data(), combined.size(), MSG_NOSIGNAL);
 
-	std::string packet_data(&buffer[8], &buffer[buffer.size()-2]);
-	int id = bit32_to_int(buffer);
-	int type = type_to_int(buffer);
+          on_log("Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "] failed authentication!");
 
-	packet packet_to_send{};
+          client.authentication_attempts++;
+          if (client.authentication_attempts >= MAX_AUTHENTICATION_ATTEMPTS) {
+             on_log("Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "] has attempted too many authentication attempts!");
+             disconnect_client(client.socket);
+             return;
+          }
+       }
+    } else {
+       if (type != SERVERDATA_EXECCOMMAND) {
+          packet_to_send = form_packet("Invalid packet type (" + std::to_string(type) + "). Double check your packets.", id, SERVERDATA_RESPONSE_VALUE);
+          on_log("Invalid packet type (" + std::to_string(type) + ") sent by [" + inet_ntoa(client.sock_info.sin_addr) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "]. Asking client to double check their packets.");
+          send(client.socket, packet_to_send.data.data(), packet_to_send.length, MSG_NOSIGNAL);
+       } else {
+          on_log("Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "] has asked to execute the command: \"" + packet_data + "\"");
+          if (!on_command) {
+             on_log("You have not set any response for on_command! The server will default to a blank response.");
+             packet_to_send = form_packet("", id, SERVERDATA_RESPONSE_VALUE);
+             send(client.socket, packet_to_send.data.data(), packet_to_send.length, MSG_NOSIGNAL);
+          } else {
+             client_command command{};
+             command.command = packet_data;
+             command.client = client;
 
-	if (!client.authenticated) {
-		on_log("Client not authenticated, handling authentication.");
-		if (packet_data == password) {
-			packet_to_send = form_packet("", id, SERVERDATA_AUTH_RESPONSE);
-			client.authenticated = true;
-			on_log("Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "] has authenticated successfully!");
-		} else {
-			packet_to_send = form_packet("", -1, SERVERDATA_AUTH_RESPONSE);
-			on_log("Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "] failed authentication!");
+             std::string text_to_send = on_command(command);
+             on_log("Sending reply to client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "].");
 
-			client.authentication_attempts++;
+             if (text_to_send.empty()) {
+                 packet p1 = form_packet("", 0, SERVERDATA_CONSOLE_LOG);
+                 packet p2 = form_packet("", id, SERVERDATA_RESPONSE_VALUE);
+                 
+                 std::vector<char> combined;
+                 combined.reserve(p1.length + p2.length);
+                 combined.insert(combined.end(), p1.data.begin(), p1.data.end());
+                 combined.insert(combined.end(), p2.data.begin(), p2.data.end());
+                 send(client.socket, combined.data(), combined.size(), MSG_NOSIGNAL);
+                 return;
+             }
 
-			// Client has attempted too many authentication attempts, we should now remove them.
-			if (client.authentication_attempts >= MAX_AUTHENTICATION_ATTEMPTS) {
-				on_log("Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "] has attempted too many authentication attempts!");
-				disconnect_client(client.socket);
-				return;
-			}
-		}
-	} else {
-		if (type != SERVERDATA_EXECCOMMAND) {
-			packet_to_send = form_packet("Invalid packet type (" + std::to_string(type) + "). Double check your packets.", id, SERVERDATA_RESPONSE_VALUE);
-			on_log("Invalid packet type (" + std::to_string(type) + ") sent by [" + inet_ntoa(client.sock_info.sin_addr) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "]. Asking client to double check their packets.");
-		} else {
-			on_log("Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "] has asked to execute the command: \"" + packet_data + "\"");
-			if (!on_command) {
-				on_log("You have not set any response for on_command! The server will default to a blank response.");
+             size_t offset = 0;
+             const size_t MAX_BODY_LEN = 4000;
+             while (offset < text_to_send.length()) {
+                 size_t chunkLen = min(MAX_BODY_LEN, text_to_send.length() - offset);
+                 std::string chunk = text_to_send.substr(offset, chunkLen);
 
-				/*
-				 * Whilst sending information about the server not responding would be nice,
-				 * we would end up with the possibility of clients thinking that is the response.
-				 * It's better to just send no information and let clients assume that meant
-				 * the server didn't like the command.
-				 */
-				packet_to_send = form_packet("", id, SERVERDATA_RESPONSE_VALUE);
-			} else {
-				client_command command{};
-				command.command = packet_data;
-				command.client = client;
+                 packet p1 = form_packet(chunk, 0, SERVERDATA_CONSOLE_LOG);
+                 packet p2 = form_packet(chunk, id, SERVERDATA_RESPONSE_VALUE);
+                 
+                 std::vector<char> combined;
+                 combined.reserve(p1.length + p2.length);
+                 combined.insert(combined.end(), p1.data.begin(), p1.data.end());
+                 combined.insert(combined.end(), p2.data.begin(), p2.data.end());
 
-				std::string text_to_send = on_command(command);
-
-				on_log("Sending reply \"" + text_to_send + "\" to client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "].");
-
-				packet_to_send = form_packet(text_to_send, id, SERVERDATA_RESPONSE_VALUE);
-			}
-		}
-	}
-
-	on_log("Sending packet (of size: " + std::to_string(packet_to_send.length) + ") to client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "]");
-
-	if (send(client.socket, packet_to_send.data.data(), packet_to_send.length, MSG_NOSIGNAL) < 0) {
-		const last_error err = get_last_error();
-		on_log("Failed to send a packet to Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + " | Error code: " + std::to_string(err.error_code) + "]!");
-
-		// Since the client looks to have disconnected, we need to check their heartbeat immediately.
-		if (err.type_of_error == DISCONNECTED) {
-			client.last_heartbeat = 0;
-		}
-	}
+                 if (send(client.socket, combined.data(), combined.size(), MSG_NOSIGNAL) < 0) {
+                     const last_error err = get_last_error();
+                     on_log("Failed to send a chunked packet to Client | Error code: " + std::to_string(err.error_code) + "!");
+                     if (err.type_of_error == DISCONNECTED) client.last_heartbeat = 0;
+                     return;
+                 }
+                 offset += chunkLen;
+             }
+             return; 
+          }
+       }
+    }
 }
 
 bool rconpp::rcon_server::send_heartbeat(connected_client& client) {
-	on_log("Sending heartbeat to Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "]");
+    on_log("Sending heartbeat to Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "]");
 
-	packet packet_to_send = form_packet("", -1, SERVERDATA_RESPONSE_VALUE);
-	if (send(client.socket, packet_to_send.data.data(), packet_to_send.length, MSG_NOSIGNAL) < 0) {
-		const last_error err = get_last_error();
-		on_log("Failed to send a heartbeat to Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + " | Error code: " + std::to_string(err.error_code) + "]!");
-		return false;
-	}
+    packet p1 = form_packet("", 0, SERVERDATA_CONSOLE_LOG);
+    packet p2 = form_packet("", client.auth_id, SERVERDATA_RESPONSE_VALUE);
+    
+    std::vector<char> combined;
+    combined.reserve(p1.length + p2.length);
+    combined.insert(combined.end(), p1.data.begin(), p1.data.end());
+    combined.insert(combined.end(), p2.data.begin(), p2.data.end());
 
-	client.last_heartbeat = time(nullptr);
+    if (send(client.socket, combined.data(), combined.size(), MSG_NOSIGNAL) < 0) {
+       const last_error err = get_last_error();
+       on_log("Failed to send a heartbeat to Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + " | Error code: " + std::to_string(err.error_code) + "]!");
+       return false;
+    }
 
-	return true;
+    client.last_heartbeat = time(nullptr);
+    return true;
 }
 
 void rconpp::rcon_server::client_process_loop(connected_client& client) {
-	while (client.connected) {
-		read_packet(client);
+    while (client.connected) {
+       read_packet(client);
 
-		const time_t current_time = time(nullptr);
+       const time_t current_time = time(nullptr);
 
-		if (client.last_heartbeat == 0 || current_time - client.last_heartbeat >= HEARTBEAT_TIME) {
-			if (!send_heartbeat(client)) {
-				on_log("Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + " | Socket: " + std::to_string(client.socket) + "] is now being disconnected.");
-				disconnect_client(client.socket);
-				// disconnect_client should do this, but we'll do it too.
-				client.connected = false;
-			}
-		}
+       if (client.last_heartbeat == 0 || current_time - client.last_heartbeat >= HEARTBEAT_TIME) {
+          if (!send_heartbeat(client)) {
+             on_log("Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + " | Socket: " + std::to_string(client.socket) + "] is now being disconnected.");
+             disconnect_client(client.socket);
+             client.connected = false;
+          }
+       }
 
-		// No need to let the server keep running this causing 100% usage on a thread, we can wait a bit between requests.
-		std::this_thread::sleep_for(std::chrono::milliseconds(100));
-	}
+       std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
 }
 
 void rconpp::rcon_server::start(bool return_after) {
-	auto block_calling_thread = [this]() {
-		std::mutex thread_mutex;
-		std::unique_lock thread_lock(thread_mutex);
-		this->terminating.wait(thread_lock);
-	};
+    auto block_calling_thread = [this]() {
+       std::mutex thread_mutex;
+       std::unique_lock thread_lock(thread_mutex);
+       this->terminating.wait(thread_lock);
+    };
 
-	if (port > 65535) {
-		on_log("Invalid port! The port can't exceed 65535!");
-		return;
-	}
+    if (port > 65535) {
+       on_log("Invalid port! The port can't exceed 65535!");
+       return;
+    }
 
-	on_log("Attempting to startup an RCON server...");
+    on_log("Attempting to startup an RCON server...");
 
-	if (!startup_server()) {
-		on_log("RCON server is aborting as it failed to initiate server.");
-		return;
-	}
+    if (!startup_server()) {
+       on_log("RCON server is aborting as it failed to initiate server.");
+       return;
+    }
 
-	online = true;
+    online = true;
+    on_log("Server is now listening, initiating runners...");
 
-	on_log("Server is now listening, initiating runners...");
+    accept_connections_runner = std::thread([this]() {
+       while (online) {
+          sockaddr_in client_info{};
+          socklen_t client_len = sizeof(client_info);
+          SOCKET_TYPE client_socket = accept(sock, reinterpret_cast<sockaddr*>(&client_info), &client_len);
 
-	accept_connections_runner = std::thread([this]() {
-		while (online) {
-			sockaddr_in client_info{};
+          if (client_socket == INVALID_SOCKET) {
+             const last_error err = get_last_error();
+             on_log("A new client attempted to join but failed [Error code: " + std::to_string(err.error_code) + "]!");
+             continue;
+          }
 
-			socklen_t client_len = sizeof(client_info);
-			SOCKET_TYPE client_socket = accept(sock, reinterpret_cast<sockaddr*>(&client_info), &client_len);
+          on_log("Client [" + std::string(inet_ntoa(client_info.sin_addr)) + ":" + std::to_string(ntohs(client_info.sin_port)) + " | Socket: " + std::to_string(client_socket) + "] is connecting to the server.");
 
-			if (client_socket == INVALID_SOCKET) {
-				const last_error err = get_last_error();
-				on_log("A new client attempted to join but failed [Error code: " + std::to_string(err.error_code) + "]!");
-				continue;
-			}
+          connected_client client{};
+          client.sock_info = client_info;
+          client.socket = client_socket;
+          client.connected = true;
+          client.last_heartbeat = time(nullptr);
 
-			on_log("Client [" + std::string(inet_ntoa(client_info.sin_addr)) + ":" + std::to_string(ntohs(client_info.sin_port)) + " | Socket: " + std::to_string(client_socket) + "] is connecting to the server.");
+          add_client(client_socket, client);
 
-			connected_client client{};
+          std::thread client_thread(&rcon_server::client_process_loop, this, std::ref(connected_clients.at(client_socket)));
 
-			client.sock_info = client_info;
-			client.socket = client_socket;
-			client.connected = true;
-			// We don't want to send a heartbeat instantly and confuse clients.
-			client.last_heartbeat = time(nullptr);
+          while (!request_handlers_mutex.try_lock()) {
+             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+          }
 
-			add_client(client_socket, client);
+          request_handlers.insert({ client_socket, std::move(client_thread) });
+          request_handlers.at(client_socket).detach();
+          request_handlers_mutex.unlock();
 
-			std::thread client_thread(&rcon_server::client_process_loop, this, std::ref(connected_clients.at(client_socket)));
+          on_log("Client [" + std::string(inet_ntoa(client_info.sin_addr)) + ":" + std::to_string(ntohs(client_info.sin_port)) + " | Socket: " + std::to_string(client_socket) + "] has successfully connected to the server, asking for authentication.");
+       }
+    });
 
-			while (!request_handlers_mutex.try_lock()) {
-				std::this_thread::sleep_for(std::chrono::milliseconds(100));
-			}
+    accept_connections_runner.detach();
+    on_log("Server is now ready!");
 
-			request_handlers.insert({ client_socket, std::move(client_thread) });
-
-			request_handlers.at(client_socket).detach();
-
-			request_handlers_mutex.unlock();
-
-			on_log("Client [" + std::string(inet_ntoa(client_info.sin_addr)) + ":" + std::to_string(ntohs(client_info.sin_port)) + " | Socket: " + std::to_string(client_socket) + "] has successfully connected to the server, asking for authentication.");
-		}
-	});
-
-	accept_connections_runner.detach();
-
-	on_log("Server is now ready!");
-
-	if (!return_after) {
-		block_calling_thread();
-	}
+    if (!return_after) {
+       block_calling_thread();
+    }
 }
