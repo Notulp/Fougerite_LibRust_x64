@@ -43,7 +43,6 @@ std::string g_RconPassword = "testing";
 std::string g_RconCaptureBuffer;
 bool g_IsCapturingRcon = false;
 
-// Fixed: Recursive Mutex prevents deadlock when calling out to C# Engine
 std::recursive_mutex g_RconCaptureMutex;
 
 bool g_IsRunning = false;
@@ -217,18 +216,18 @@ void ParseCfgFile(const std::string& filePath)
         {
             int p = atoi(val.c_str());
             if (p > 0) g_GamePort = p;
-            std::cout << "[LibRust x64] Game Port set to " << g_GamePort << "\n";
+            std::cout << "[Fougerite LibRust x64] Game Port set to " << g_GamePort << "\n";
         }
         else if (key == "rcon.port")
         {
             int p = atoi(val.c_str());
             if (p > 0) g_RconPort = p;
-            std::cout << "[LibRust x64] RCON Port set to " << g_RconPort << "\n";
+            std::cout << "[Fougerite LibRust x64] RCON Port set to " << g_RconPort << "\n";
         }
         else if (key == "rcon.password")
         {
             if (!val.empty()) g_RconPassword = val;
-            std::cout << "[LibRust x64] RCON Password found " << "\n";
+            std::cout << "[Fougerite LibRust x64] RCON Password found " << "\n";
         }
     }
 }
@@ -258,47 +257,79 @@ EXPORT int Initialize(char** args, int numargs)
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
 
+    char exePath[MAX_PATH];
+    GetModuleFileNameA(NULL, exePath, MAX_PATH);
+    std::string exeDir = exePath;
+    std::size_t lastSlash = exeDir.find_last_of("\\/");
+    if (lastSlash != std::string::npos)
+    {
+        exeDir = exeDir.substr(0, lastSlash + 1);
+    }
+
     std::string cfgPath = "";
+    bool hasCfgArg = false;
+
     for (int i = 0; i < numargs; ++i)
     {
         if (strcmp(args[i], "-port") == 0 && (i + 1) < numargs)
         {
             g_GamePort = atoi(args[i + 1]);
+            g_RconPort = g_GamePort + 1;
+            std::cout << "[Fougerite LibRust x64] Game Port set to " << g_GamePort << "\n";
+            std::cout << "[Fougerite LibRust x64] RCON Port set to " << g_RconPort << "\n";
         }
         if (strcmp(args[i], "-cfg") == 0 && (i + 1) < numargs)
         {
             cfgPath = args[i + 1];
+            hasCfgArg = true;
         }
     }
 
-    if (!cfgPath.empty())
+    if (hasCfgArg && !cfgPath.empty())
     {
-        char exePath[MAX_PATH];
-        GetModuleFileNameA(NULL, exePath, MAX_PATH);
-        std::string exeDir = exePath;
-        std::size_t lastSlash = exeDir.find_last_of("\\/");
-        if (lastSlash != std::string::npos)
-        {
-            exeDir = exeDir.substr(0, lastSlash + 1);
-        }
         std::string fullPath = exeDir + cfgPath;
         ParseCfgFile(fullPath);
+        std::cout << "[Fougerite LibRust x64] Config file loaded: " << fullPath << "\n";
+    }
+    else
+    {
+        // Scan for standard config path locations relative to server directory structure 
+        std::string fallbackPath1 = exeDir + "cfg/server.cfg";
+        std::string fallbackPath2 = exeDir + "server.cfg";
+
+        std::ifstream f1(fallbackPath1);
+        if (f1.is_open())
+        {
+            f1.close();
+            std::cout << "[Fougerite LibRust x64] Auto-detected config layout mapping: " << fallbackPath1 << "\n";
+            ParseCfgFile(fallbackPath1);
+        }
+        else
+        {
+            std::ifstream f2(fallbackPath2);
+            if (f2.is_open())
+            {
+                f2.close();
+                std::cout << "[Fougerite LibRust x64] Auto-detected config layout mapping: " << fallbackPath2 << "\n";
+                ParseCfgFile(fallbackPath2);
+            }
+        }
     }
 
     if (g_RconPort == 0)
     {
         g_RconPort = g_GamePort + 1;
-        std::cout << "[LibRust x64] RCON Port not specified, defaulting to " << g_RconPort << "\n";
+        std::cout << "[Fougerite LibRust x64] RCON Port not specified, defaulting to " << g_RconPort << "\n";
     }
     else
     {
-        std::cout << "[LibRust x64] RCON Port set to " << g_RconPort << "\n";
+        std::cout << "[Fougerite LibRust x64] RCON Port set to " << g_RconPort << "\n";
     }
 
     g_IsRunning = true;
     g_InputThread = std::thread(ConsoleInputWorker);
 
-    std::cout << "[LibRust x64] Dedicated Native System Online.\n";
+    std::cout << "[Fougerite LibRust x64] Dedicated Native System Online.\n";
     return 1;
 }
 
@@ -367,6 +398,16 @@ EXPORT bool Console_Closing()
 EXPORT void Console_AllowClose()
 {
     g_AllowCloseGranted = true;
+    HWND hWnd = GetConsoleWindow();
+    if (hWnd)
+    {
+        HMENU hMenu = GetSystemMenu(hWnd, FALSE);
+        if (hMenu)
+        {
+            EnableMenuItem(hMenu, SC_CLOSE, MF_BYCOMMAND | MF_ENABLED);
+            DrawMenuBar(hWnd);
+        }
+    }
 }
 
 EXPORT const char* Console_Input()
@@ -468,15 +509,15 @@ EXPORT void RCON_SetupCallbacks(rconFuncAuth auth, rconFuncCommand command)
 
     g_RconServer->start(true);
 
-    std::cout << "[LibRust x64] rconpp instance created. Socket Listening: " << (g_RconServer->online
+    std::cout << "[Fougerite LibRust x64] rconpp instance created. Socket Listening: " << (g_RconServer->online
         ? "SUCCESS"
         : "FAILED") << "\n";
     if (!g_RconServer->online)
     {
-        std::cout << "[LibRust x64] Socket Bind Error Code: " << WSAGetLastError() << "\n";
+        std::cout << "[Fougerite LibRust x64] Socket Bind Error Code: " << WSAGetLastError() << "\n";
     }
 
-    std::cout << "[LibRust x64] rconpp pipeline mapped on TCP port " << g_RconPort << "\n";
+    std::cout << "[Fougerite LibRust x64] rconpp pipeline mapped on TCP port " << g_RconPort << "\n";
 }
 
 EXPORT void FreezeMonitor_On()
@@ -512,11 +553,11 @@ EXPORT bool Steam_ServerStartup(int port, int protocol)
         SteamGameServer()->SetProduct("rust");
         SteamGameServer()->SetGameDescription("Rust Legacy x64");
         SteamGameServer()->LogOnAnonymous();
-        std::cout << "[LibRust x64] SteamGameServer Initialized with Protocol " << versionString << " successfully.\n";
+        std::cout << "[Fougerite LibRust x64] SteamGameServer Initialized with Protocol " << versionString << " successfully.\n";
     }
     else
     {
-        std::cout << "[LibRust x64] SteamGameServer Initialization FAILED.\n";
+        std::cout << "[Fougerite LibRust x64] SteamGameServer Initialization FAILED.\n";
     }
     return result;
 }

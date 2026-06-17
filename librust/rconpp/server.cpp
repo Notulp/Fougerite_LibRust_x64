@@ -111,7 +111,7 @@ void rconpp::rcon_server::broadcast_log(const std::string& log) {
         if (client.authenticated) {
             size_t offset = 0;
             while (offset < log.length()) {
-                size_t chunkLen = min((size_t)MAX_BODY_LEN, log.length() - offset);
+                size_t chunkLen = (std::min)((size_t)MAX_BODY_LEN, log.length() - offset);
                 std::string chunk = log.substr(offset, chunkLen);
 
                 packet p1 = form_packet(chunk, 0, SERVERDATA_CONSOLE_LOG);
@@ -188,14 +188,15 @@ void rconpp::rcon_server::read_packet(connected_client& client) {
           combined.insert(combined.end(), p2.data.begin(), p2.data.end());
           send(client.socket, combined.data(), combined.size(), MSG_NOSIGNAL);
 
-          on_log("Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "] failed authentication!");
-
-          client.authentication_attempts++;
-          if (client.authentication_attempts >= MAX_AUTHENTICATION_ATTEMPTS) {
-             on_log("Client [" + std::string(inet_ntoa(client.sock_info.sin_addr)) + ":" + std::to_string(ntohs(client.sock_info.sin_port)) + "] has attempted too many authentication attempts!");
-             disconnect_client(client.socket);
-             return;
+          std::string client_ip = inet_ntoa(client.sock_info.sin_addr);
+          on_log("RCON connection from " + client_ip + " was unsuccessful - ignoring them for 60 seconds");
+          
+          {
+              std::lock_guard<std::mutex> lock(blocked_ips_mutex);
+              blocked_ips[client_ip] = time(nullptr);
           }
+
+          disconnect_client(client.socket);
        }
     } else {
        if (type != SERVERDATA_EXECCOMMAND) {
@@ -231,7 +232,7 @@ void rconpp::rcon_server::read_packet(connected_client& client) {
              size_t offset = 0;
              const size_t MAX_BODY_LEN = 4000;
              while (offset < text_to_send.length()) {
-                 size_t chunkLen = min(MAX_BODY_LEN, text_to_send.length() - offset);
+                 size_t chunkLen = (std::min)(MAX_BODY_LEN, text_to_send.length() - offset);
                  std::string chunk = text_to_send.substr(offset, chunkLen);
 
                  packet p1 = form_packet(chunk, 0, SERVERDATA_CONSOLE_LOG);
@@ -250,7 +251,6 @@ void rconpp::rcon_server::read_packet(connected_client& client) {
                  }
                  offset += chunkLen;
              }
-             return; 
           }
        }
     }
@@ -329,7 +329,26 @@ void rconpp::rcon_server::start(bool return_after) {
              continue;
           }
 
-          on_log("Client [" + std::string(inet_ntoa(client_info.sin_addr)) + ":" + std::to_string(ntohs(client_info.sin_port)) + " | Socket: " + std::to_string(client_socket) + "] is connecting to the server.");
+          std::string client_ip = inet_ntoa(client_info.sin_addr);
+          {
+              std::lock_guard<std::mutex> lock(blocked_ips_mutex);
+              auto it = blocked_ips.find(client_ip);
+              if (it != blocked_ips.end()) {
+                  if (time(nullptr) - it->second < 60) {
+                      on_log("Ignoring RCON connection from " + client_ip + " (too soon)");
+#ifdef _WIN32
+                      closesocket(client_socket);
+#else
+                      close(client_socket);
+#endif
+                      continue;
+                  } else {
+                      blocked_ips.erase(it);
+                  }
+              }
+          }
+
+          on_log("Client [" + client_ip + ":" + std::to_string(ntohs(client_info.sin_port)) + " | Socket: " + std::to_string(client_socket) + "] is connecting to the server.");
 
           connected_client client{};
           client.sock_info = client_info;

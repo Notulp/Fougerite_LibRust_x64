@@ -13,11 +13,10 @@
 #include <fcntl.h>
 #include <string>
 #include <functional>
-#include <vector>
-#include <iostream>
-#include <cstring>
 #include <thread>
 #include <condition_variable>
+#include <unordered_map>
+#include <mutex>
 #include "utilities.h"
 
 namespace rconpp {
@@ -50,6 +49,9 @@ class RCONPP_EXPORT rcon_server {
 
     std::mutex connected_clients_mutex;
     std::mutex request_handlers_mutex;
+    
+    std::unordered_map<std::string, time_t> blocked_ips{};
+    std::mutex blocked_ips_mutex;
 
 public:
     bool online{false};
@@ -69,19 +71,13 @@ public:
     ~rcon_server();
 
     void start(bool return_after);
-    
     void broadcast_log(const std::string& log);
-
     void disconnect_client(SOCKET_TYPE client_socket, bool remove_after = true);
 
 private:
-
     bool startup_server();
-
     void read_packet(connected_client& client);
-
     bool send_heartbeat(connected_client& client);
-
     void client_process_loop(connected_client& client);
 
     void add_client(const SOCKET_TYPE client_socket, connected_client& client) {
