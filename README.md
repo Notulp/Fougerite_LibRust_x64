@@ -143,7 +143,7 @@ This is a threading synchronization problem between the native rconpp callback t
 ## Dependencies
 
 - [Steamworks SDK 1.29a](https://partner.steamgames.com/) - `steam/steam_gameserver.h`
-- [rconpp](https://github.com/Miku-UI/rconpp) - TCP RCON server library
+- [rconpp](https://github.com/Miku-UI/rconpp) - TCP RCON server library, kind of customized, available in the repo...
 - Windows SDK (Winsock2, Win32 console APIs)
 - MSVC x64 build toolchain
 
@@ -158,3 +158,29 @@ Compile as a 64-bit DLL (`x64`) targeting Windows. Link against `steam_api64.lib
 ## Status
 
 Rust Legacy dedicated server runs properly under a 64-bit process with this library. Steam authentication, VAC, server listings, group status queries, and console I/O all function correctly. RCON is partially working but output response is unreliable pending the threading fix.
+
+---
+
+## Custom RCON Client (Python)
+
+Due to RustAdmin's brittle and non-standard internal state machine, maintaining direct compatibility with it is counterproductive. RustAdmin expects a raw, unbuffered stream of interleaved TCP packet pairings across multiple engine threads, which breaks in our modern x64 multithreaded pipeline.
+
+To solve this, a dedicated standalone RCON administration client tool (`legacy_rcon.py`) is provided from me. It features a base graphical UI, properly parses player entries from the `status` block into a table, and streams the background console feedback live without locking or crashing the server thread.
+
+### Requirements
+
+- Python 3.x
+- Required dependencies can be installed via pip:
+```
+pip install customtkinter pyinstaller
+```
+
+### Compiling to a Standalone Executable
+
+To package the tool into a portable, standalone Windows `.exe` application:
+
+```
+pyinstaller --noconsole --onefile legacy_rcon.py
+```
+
+Once the compilation finishes, you can find the executable inside the generated `dist` directory.
