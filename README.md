@@ -84,29 +84,29 @@ Sets up the RCON callback pipeline. The game passes in two delegates - one for p
 
 Every function imported by assembly-csharp has been implemented. Full list:
 
-| Export | Status | Notes |
-|---|---|---|
+| Export | Status | Notes                                                                  |
+|---|---|------------------------------------------------------------------------|
 | `Initialize` | ✅ | Console setup, WSA init, cfg parsing, arg parsing, starts input thread |
-| `Shutdown` | ✅ | Stops input thread, destroys RCON server, WSA cleanup |
-| `Cycle` | ✅ | Calls `SteamGameServer_RunCallbacks()` |
-| `Console_Closing` | ✅ | Returns close request flag |
-| `Console_AllowClose` | ✅ | Grants the blocked close handler permission to exit |
-| `Console_Input` | ✅ | Pops next command string from the input queue |
-| `ConsoleLog` | ✅ | Colored console output; captures into RCON buffer when active |
-| `SetTitleOfConsole` | ✅ | UTF-8 → wide char, calls `SetConsoleTitleW` |
-| `FreezeMonitor_On` | ✅ (stub) | No-op, satisfies the import |
-| `FreezeMonitor_Off` | ✅ (stub) | No-op, satisfies the import |
-| `RCON_SetupCallbacks` | ✅ ⚠️ | Functional but has known issues (see below) |
-| `Steam_ServerStartup` | ✅ | `SteamGameServer_Init` with `eServerModeAuthenticationAndSecure` |
-| `Steam_ServerShutdown` | ✅ | Cleans up callbacks, calls `SteamGameServer_Shutdown` |
-| `Steam_UpdateServer` | ✅ | Pushes max players, map, name, and tags to Steam |
-| `SteamServer_SetCallback_UserAuth` | ✅ | Stores the managed delegate pointer |
-| `SteamServer_SetCallback_UserGroup` | ✅ | Stores the managed delegate pointer |
-| `SteamServer_BeginAuthSession` | ✅ | Calls `BeginAuthSession`, returns string status |
-| `SteamServer_UserGroupStatus` | ✅ | Calls `RequestUserGroupStatus` |
-| `SteamServer_UserLeave` | ✅ | Calls `EndAuthSession` |
-| `SteamServer_GetSteamID` | ✅ | Returns server SteamID as uint64 |
-| `SteamServer_GetPublicIP` | ✅ | Returns public IP as uint32 |
+| `Shutdown` | ✅ | Stops input thread, destroys RCON server, WSA cleanup                  |
+| `Cycle` | ✅ | Calls `SteamGameServer_RunCallbacks()`                                 |
+| `Console_Closing` | ✅ | Returns close request flag                                             |
+| `Console_AllowClose` | ✅ | Grants the blocked close handler permission to exit                    |
+| `Console_Input` | ✅ | Pops next command string from the input queue                          |
+| `ConsoleLog` | ✅ | Colored console output; captures into RCON buffer when active          |
+| `SetTitleOfConsole` | ✅ | UTF-8 → wide char, calls `SetConsoleTitleW`                            |
+| `FreezeMonitor_On` | ✅ (stub) | No-op, satisfies the import                                            |
+| `FreezeMonitor_Off` | ✅ (stub) | No-op, satisfies the import                                            |
+| `RCON_SetupCallbacks` | ✅ ⚠️ | Old RCON tools may not work with it                                    |
+| `Steam_ServerStartup` | ✅ | `SteamGameServer_Init` with `eServerModeAuthenticationAndSecure`       |
+| `Steam_ServerShutdown` | ✅ | Cleans up callbacks, calls `SteamGameServer_Shutdown`                  |
+| `Steam_UpdateServer` | ✅ | Pushes max players, map, name, and tags to Steam                       |
+| `SteamServer_SetCallback_UserAuth` | ✅ | Stores the managed delegate pointer                                    |
+| `SteamServer_SetCallback_UserGroup` | ✅ | Stores the managed delegate pointer                                    |
+| `SteamServer_BeginAuthSession` | ✅ | Calls `BeginAuthSession`, returns string status                        |
+| `SteamServer_UserGroupStatus` | ✅ | Calls `RequestUserGroupStatus`                                         |
+| `SteamServer_UserLeave` | ✅ | Calls `EndAuthSession`                                                 |
+| `SteamServer_GetSteamID` | ✅ | Returns server SteamID as uint64                                       |
+| `SteamServer_GetPublicIP` | ✅ | Returns public IP as uint32                                            |
 
 All 21 exports are covered.
 
@@ -134,9 +134,9 @@ If `rcon.port` is not specified, it defaults to `server.port + 1`.
 
 ### RCON - Work In Progress
 
-The RCON implementation (`RCON_SetupCallbacks` / `rconpp`) is currently buggy. The core issue is that RCON commands dispatched from the native TCP thread call back into the managed Unity `ConsoleSystem` via a delegate, but `RunCommand` in the game queues execution onto the main thread via `Loom.QueueOnMainThread`. The console output capture buffer (`g_RconCaptureBuffer`) is captured synchronously at the native level before the main thread has actually run the command, meaning RCON responses are frequently empty or stale.
-
-This is a threading synchronization problem between the native rconpp callback thread and Unity's main thread. It is a known issue and a fix is in progress. Despite this, the server itself runs correctly - RCON just may not return output reliably.
+The RCON implementation (`RCON_SetupCallbacks` / `rconpp`) had to be customized, I couldn't get it to work with RustAdmin.
+Feel free to take the simple RustLegacyRCON python script from the repo, and adapt it to your needs.
+You could also try fixing the compatibility issue. I found it a waste of time.
 
 ---
 
