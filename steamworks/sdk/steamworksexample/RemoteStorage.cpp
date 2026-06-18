@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2008, Valve LLC, All rights reserved. ============
+//========= Copyright 1996-2008, Valve LLC, All rights reserved. ============
 //
 // Purpose: Class for tracking stats and achievements
 //
@@ -7,8 +7,9 @@
 
 #include "stdafx.h"
 #include "RemoteStorage.h"
-#include "remotestoragesync.h"
+#include "BaseMenu.h"
 #include <assert.h>
+
 
 #define CLOUDDISP_FONT_HEIGHT 20
 #define CLOUDDISP_COLUMN_WIDTH 600
@@ -17,6 +18,7 @@
 
 #define MESSAGE_FILE_NAME "message.dat"
 
+extern uint64 g_ulLastReturnKeyTick;
 
 //-----------------------------------------------------------------------------
 // NOTE
@@ -31,21 +33,12 @@
 //
 //-----------------------------------------------------------------------------
 
-
-//-----------------------------------------------------------------------------
-// Purpose: CRemoteStorage implementation
-//-----------------------------------------------------------------------------
-
 //-----------------------------------------------------------------------------
 // Purpose: Constructor
 //-----------------------------------------------------------------------------
-CRemoteStorage::CRemoteStorage( IGameEngine *pGameEngine ) : m_pGameEngine( pGameEngine ), m_pRemoteStorageSync(NULL)
+CRemoteStorage::CRemoteStorage( IGameEngine *pGameEngine ) : m_pGameEngine( pGameEngine )
 {
 	m_pRemoteStorageScreen = new CRemoteStorageScreen( pGameEngine );
-
-#ifdef _PS3
-	m_pRemoteStorageSync = new CRemoteStorageSync( pGameEngine );
-#endif
 }
 
 
@@ -54,12 +47,6 @@ CRemoteStorage::CRemoteStorage( IGameEngine *pGameEngine ) : m_pGameEngine( pGam
 //-----------------------------------------------------------------------------
 CRemoteStorage::~CRemoteStorage()
 {
-	if ( m_pRemoteStorageSync )
-	{
-		assert( m_pRemoteStorageSync->BFinished() );
-		delete m_pRemoteStorageSync;
-	}
-
 	delete m_pRemoteStorageScreen;
 }
 
@@ -69,61 +56,7 @@ CRemoteStorage::~CRemoteStorage()
 //-----------------------------------------------------------------------------
 void CRemoteStorage::Show()
 {
-	m_eState = k_ERemoteStorageStateIdle;
-	CheckState();
-}
-
-
-//-----------------------------------------------------------------------------
-// Purpose: Check's if we have finished our current step and should advance to the next
-//
-// NOTE:	These steps are not necessary for platforms where the Steam client is running. On those platforms,
-//			the Steam client will take care of synchronization and m_pRemoteStorageSync will be NULL
-//-----------------------------------------------------------------------------
-void CRemoteStorage::CheckState()
-{
-	switch( m_eState )
-	{
-	default:
-	case k_ERemoteStorageStateIdle:
-		if ( m_pRemoteStorageSync )
-			m_pRemoteStorageSync->SynchronizeToClient();
-
-		// advance to next state
-		m_eState = k_ERemoteStorageStateSyncToClient;
-
-		// fall through
-
-	case k_ERemoteStorageStateSyncToClient:
-		if ( m_pRemoteStorageSync && !m_pRemoteStorageSync->BFinished() )
-			break;
-
-		// advance to next state
-		m_eState = k_ERemoteStorageStateDisplayMessage;
-		m_pRemoteStorageScreen->Show();
-		break;
-
-	case k_ERemoteStorageStateDisplayMessage:
-		if ( !m_pRemoteStorageScreen->BFinished() )
-			break;
-
-		// advance to next state
-		m_eState = k_ERemoteStorageStateSyncToServer;
-		if ( m_pRemoteStorageSync )
-			m_pRemoteStorageSync->SynchronizeToServer();
-
-		// fall through
-
-	case k_ERemoteStorageStateSyncToServer:
-		if ( m_pRemoteStorageSync && !m_pRemoteStorageSync->BFinished() )
-			break;
-
-		// complete. Return to the main menu
-		m_eState = k_ERemoteStorageStateIdle;
-		SpaceWarClient()->SetGameState( k_EClientGameMenu );
-
-		break;
-	}
+	m_pRemoteStorageScreen->Show();
 }
 
 
@@ -132,13 +65,9 @@ void CRemoteStorage::CheckState()
 //-----------------------------------------------------------------------------
 void CRemoteStorage::Render()
 {
-	if ( m_pRemoteStorageSync && (m_eState == k_ERemoteStorageStateSyncToClient || m_eState == k_ERemoteStorageStateSyncToServer) )
-		m_pRemoteStorageSync->Render();
-
-	if ( m_eState == k_ERemoteStorageStateDisplayMessage )
-		m_pRemoteStorageScreen->Render();
-
-	CheckState();
+	m_pRemoteStorageScreen->Render();
+	if ( m_pRemoteStorageScreen->BFinished() )
+		SpaceWarClient()->SetGameState( k_EClientGameMenu );
 }
 
 
@@ -147,8 +76,6 @@ void CRemoteStorage::Render()
 //-----------------------------------------------------------------------------
 void CRemoteStorage::OnMenuSelection( ERemoteStorageSyncMenuCommand selection )
 {
-	if ( m_pRemoteStorageSync )
-		m_pRemoteStorageSync->OnMenuSelection( selection );
 }
 
 
@@ -171,7 +98,7 @@ CRemoteStorageScreen::CRemoteStorageScreen( IGameEngine *pGameEngine ) : m_pGame
 	if ( !m_hDisplayFont )
 		OutputDebugString( "RemoteStorage font was not created properly, text won't draw\n" );
 
-	GetFileStats();	
+	GetFileStats();
 }
 
 
@@ -204,10 +131,10 @@ void CRemoteStorageScreen::LoadMessage()
 //-----------------------------------------------------------------------------
 void CRemoteStorageScreen::GetFileStats()
 {
-	m_nBytesQuota = 0;
-	m_nAvailableBytes = 0;
+	m_ulBytesQuota = 0;
+	m_ulAvailableBytes = 0;
 	m_nNumFilesInCloud = m_pSteamRemoteStorage->GetFileCount();
-	m_pSteamRemoteStorage->GetQuota( &m_nBytesQuota, &m_nAvailableBytes );
+	m_pSteamRemoteStorage->GetQuota( &m_ulBytesQuota, &m_ulAvailableBytes );
 }
 
 
@@ -218,8 +145,65 @@ void CRemoteStorageScreen::Show()
 {
 	GetFileStats();
 	LoadMessage();
+	if ( m_pGameEngine->BIsSteamInputDeviceActive() )
+	{
+		const int32 width = m_pGameEngine->GetViewportWidth();
+		const int32 pxColumn1Left = width / 2 - CLOUDDISP_COLUMN_WIDTH / 2;
+		int32 pxVertOffset = 8 * CLOUDDISP_TEXT_HEIGHT + 4 * ( CLOUDDISP_TEXT_HEIGHT + CLOUDDISP_VERT_SPACING );
+		SteamUtils()->ShowFloatingGamepadTextInput( k_EFloatingGamepadTextInputModeModeSingleLine, pxColumn1Left, pxVertOffset, CLOUDDISP_COLUMN_WIDTH, CLOUDDISP_TEXT_HEIGHT );
+	}
 }
 
+bool CRemoteStorageScreen::BHandleCancel()
+{
+	// always cancel
+	m_rgchGreetingNext[0] = 0;
+
+	if( m_pGameEngine->BIsSteamInputDeviceActive() )
+	{
+		SteamUtils()->DismissFloatingGamepadTextInput();
+	}
+
+	m_bFinished = true;
+	return true;
+}
+ 
+bool CRemoteStorageScreen::BHandleSelect()
+{
+	int nGreetingNextLength = (int)strlen( m_rgchGreetingNext );
+	bool bQuotaExceeded = nGreetingNextLength > m_ulBytesQuota;
+	if ( !bQuotaExceeded )
+	{
+		uint64 ulCurrentTickCount = m_pGameEngine->GetGameTickCount();
+		if ( ulCurrentTickCount - 150 > g_ulLastReturnKeyTick )
+		{
+			// global from BaseMenu.h!
+			g_ulLastReturnKeyTick = ulCurrentTickCount;
+
+			// Do it
+			{
+				m_bFinished = true;
+
+				strncpy( m_rgchGreeting, m_rgchGreetingNext, sizeof( m_rgchGreeting ) );
+				m_rgchGreetingNext[0] = 0;
+
+				// Note: not writing the NULL termination, so won't read it back later either.
+				bool bRet = m_pSteamRemoteStorage->FileWrite( MESSAGE_FILE_NAME, m_rgchGreeting, (int)strlen( m_rgchGreeting ) );
+
+				// Update our stats on stuff
+				GetFileStats();
+
+				if ( !bRet )
+				{
+					OutputDebugString( "RemoteStorage: Failed to write file!\n" );
+				}
+
+				return true;
+			}
+		}
+	}
+	return false;
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: Render the Remote Storage page
@@ -234,50 +218,30 @@ void CRemoteStorageScreen::Render()
 
 	DWORD dwVKDown = 0;
 
-	bool bQuotaExceeded = nGreetingNextLength > m_nBytesQuota;
+	bool bQuotaExceeded = nGreetingNextLength > m_ulBytesQuota;
+
+	if ( m_pGameEngine->BIsControllerActionActive( eControllerDigitalAction_MenuCancel ) )
+	{
+		if ( BHandleCancel() )
+			return;
+	}
+	else if ( m_pGameEngine->BIsControllerActionActive( eControllerDigitalAction_MenuSelect ) )
+	{
+		if ( BHandleSelect() )
+			return;
+	}
 
 	while ( m_pGameEngine->BGetFirstKeyDown( &dwVKDown ) )
 	{
 		if ( VK_ESCAPE == dwVKDown )
 		{
-			// cancel
-			m_rgchGreetingNext[0] = 0;
-
-			m_bFinished = true;
-			return;
+			if ( BHandleCancel() )
+				return;
 		}
 		else if ( VK_RETURN == dwVKDown )
 		{
-			if ( !bQuotaExceeded )
-			{
-				uint64 ulCurrentTickCount = m_pGameEngine->GetGameTickCount();
-				if ( ulCurrentTickCount - 150 > g_ulLastReturnKeyTick )
-				{
-					// global from BaseMenu.h!
-					g_ulLastReturnKeyTick = ulCurrentTickCount;
-
-					// Do it
-					{
-						m_bFinished = true;
-
-						strncpy( m_rgchGreeting, m_rgchGreetingNext, sizeof( m_rgchGreeting ) );
-						m_rgchGreetingNext[0] = 0;
-
-						// Note: not writing the NULL termination, so won't read it back later either.
-						bool bRet = m_pSteamRemoteStorage->FileWrite( MESSAGE_FILE_NAME, m_rgchGreeting, (int) strlen( m_rgchGreeting ) );
-						
-						// Update our stats on stuff
-						GetFileStats();
-
-						if ( !bRet )
-						{
-							OutputDebugString( "RemoteStorage: Failed to write file!\n" );
-						}
-
-						return;
-					}
-				}
-			}
+			if ( BHandleSelect() )
+				return;
 		}
 		else if ( VK_BACK == dwVKDown )
 		{
@@ -300,7 +264,7 @@ void CRemoteStorageScreen::Render()
 	}
 
 	const int32 width = m_pGameEngine->GetViewportWidth();
-	const int32 height = m_pGameEngine->GetViewportHeight();
+	//const int32 height = m_pGameEngine->GetViewportHeight();
 
 	const int32 pxColumn1Left = width / 2 - CLOUDDISP_COLUMN_WIDTH / 2;
 
@@ -323,7 +287,7 @@ void CRemoteStorageScreen::Render()
 		rect.right = rect.left + CLOUDDISP_COLUMN_WIDTH;
 		pxVertOffset = rect.bottom + CLOUDDISP_TEXT_HEIGHT + CLOUDDISP_VERT_SPACING;
 
-		sprintf_safe( rgchBuffer, "Quota: %d bytes, %d bytes remaining", m_nBytesQuota, m_nAvailableBytes );
+		sprintf_safe( rgchBuffer, "Quota: %llu bytes, %llu bytes remaining", m_ulBytesQuota, m_ulAvailableBytes );
 		m_pGameEngine->BDrawString( m_hDisplayFont, rect, D3DCOLOR_ARGB( 255, 25, 200, 25 ), TEXTPOS_CENTER|TEXTPOS_VCENTER, rgchBuffer );
 
 		rect.top = pxVertOffset;
@@ -366,7 +330,24 @@ void CRemoteStorageScreen::Render()
 		rect.right = rect.left + CLOUDDISP_COLUMN_WIDTH;
 		pxVertOffset = rect.bottom + CLOUDDISP_TEXT_HEIGHT + CLOUDDISP_VERT_SPACING;
 
-		sprintf_safe( rgchBuffer, "Hit <ENTER> to save, <ESC> to cancel" );
+		if ( m_pGameEngine->BIsSteamInputDeviceActive() )
+		{
+			const char *rgchSaveActionOrigin = m_pGameEngine->GetTextStringForControllerOriginDigital( eControllerActionSet_MenuControls, eControllerDigitalAction_MenuSelect );
+			const char *rgchCancelActionOrigin = m_pGameEngine->GetTextStringForControllerOriginDigital( eControllerActionSet_MenuControls, eControllerDigitalAction_MenuCancel );
+			if ( strcmp( rgchSaveActionOrigin, "None" ) == 0 || strcmp( rgchCancelActionOrigin, "None" ) == 0 )
+			{
+				sprintf_safe( rgchBuffer, "Hit <ENTER> to save, <ESC> to cancel. Controller bindings are not setup properly" );
+			}
+			else
+			{
+				sprintf_safe( rgchBuffer, "Hit <ENTER> or %s to save, <ESC> or %s to cancel", rgchSaveActionOrigin, rgchCancelActionOrigin );
+			}
+		}
+		else
+		{
+			sprintf_safe( rgchBuffer, "Hit <ENTER> to save, <ESC> to cancel" );
+		}
+
 		m_pGameEngine->BDrawString( m_hDisplayFont, rect, D3DCOLOR_ARGB( 255, 25, 200, 25 ), TEXTPOS_CENTER|TEXTPOS_VCENTER, rgchBuffer );
 
 		if ( bQuotaExceeded )

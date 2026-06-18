@@ -8,7 +8,12 @@
 #include <float.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if defined( OSX ) && defined( __aarch64__ )
+#include <simd/simd.h>
+#else
 #include <xmmintrin.h>
+#endif
 
 //-----------------------------------------------------------------------------
 // macros
@@ -17,7 +22,7 @@
 #define FLOAT32_NAN          BitsToFloat( FLOAT32_NAN_BITS )
 #define VEC_T_NAN FLOAT32_NAN
 
-#define FastSqrt(x) sqrt(x)
+//#define FastSqrt(x) sqrt(x)
 
 #ifndef Assert
 #define Assert(x)
@@ -69,7 +74,7 @@ inline unsigned long& FloatBits( vec_t& f )
 }
 
 
-inline unsigned long const FloatBits( const vec_t &f )
+inline unsigned long FloatBits( const vec_t &f )
 {
 	union Convertor_t
 	{
@@ -125,17 +130,27 @@ inline void SinCos( float radians, float *sine, float *cosine )
 //-----------------------------------------------------------------------------
 // The following are not declared as macros because they are often used in limiting situations,
 // and sometimes the compiler simply refuses to inline them for some reason
+#ifndef FastSqrt
 inline float FastSqrt( float x )
 {
+#if defined( OSX ) && defined( __aarch64__ )
+	return simd::sqrt( x );
+#else
 	__m128 root = _mm_sqrt_ss( _mm_load_ss( &x ) );
 	return *( reinterpret_cast<float *>( &root ) );
+#endif
 }
+#endif
 
 inline float FastRSqrtFast( float x )
 {
+#if defined( OSX ) && defined( __aarch64__ )
+	return simd::fast::rsqrt( x );
+#else
 	// use intrinsics
 	__m128 rroot = _mm_rsqrt_ss( _mm_load_ss( &x ) );
 	return *( reinterpret_cast<float *>( &rroot ) );
+#endif
 }
 // Single iteration NewtonRaphson reciprocal square root:
 // 0.5 * rsqrtps * (3 - x * rsqrtps(x) * rsqrtps(x)) 	
@@ -616,8 +631,6 @@ inline void VectorMultiply( const Vector& a, vec_t b, Vector& result );
 inline void VectorMultiply( const Vector& a, const Vector& b, Vector& result );
 inline void VectorDivide( const Vector& a, vec_t b, Vector& result );
 inline void VectorDivide( const Vector& a, const Vector& b, Vector& result );
-inline void VectorScale ( const Vector& in, vec_t scale, Vector& result );
-inline void VectorMA( const Vector& start, float scale, const Vector& direction, Vector& dest );
 
 // Vector equality with tolerance
 bool VectorsAreEqual( const Vector& src1, const Vector& src2, float tolerance = 0.0f );
@@ -1315,13 +1328,6 @@ inline void VectorMultiply( const Vector& a, const Vector& b, Vector& c )
 	c.z = a.z * b.z;
 }
 
-// for backwards compatability
-inline void VectorScale ( const Vector& in, vec_t scale, Vector& result )
-{
-	VectorMultiply( in, scale, result );
-}
-
-
 inline void VectorDivide( const Vector& a, vec_t b, Vector& c )
 {
 	CHECK_VALID(a);
@@ -1544,7 +1550,8 @@ inline void ComputeClosestPoint( const Vector& vecStart, float flMaxDist, const 
 	else
 	{
 		vecDelta /= FastSqrt( flDistSqr );
-		VectorMA( vecStart, flMaxDist, vecDelta, *pResult );
+		vecDelta *= flMaxDist;
+		VectorAdd( vecStart, vecDelta, *pResult );
 	}
 }
 
@@ -2026,15 +2033,6 @@ inline void VectorCopy( RadianEuler const& src, RadianEuler &dst )
 	dst.x = src.x;
 	dst.y = src.y;
 	dst.z = src.z;
-}
-
-inline void VectorScale( RadianEuler const& src, float b, RadianEuler &dst )
-{
-	CHECK_VALID(src);
-	Assert( IsFinite(b) );
-	dst.x = src.x * b;
-	dst.y = src.y * b;
-	dst.z = src.z * b;
 }
 
 inline bool RadianEuler::IsValid() const

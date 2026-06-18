@@ -21,8 +21,6 @@ enum ERemoteStorageSyncMenuCommand
 	k_EMenuCommandNone = 0,
 	k_EMenuCommandProgress = 1,
 	k_EMenuCommandSyncComplete = 2,
-	k_EMenuCommandKeepClient = 3,
-	k_EMenuCommandKeepServer = 4
 };
 
 //-----------------------------------------------------------------------------
@@ -46,19 +44,7 @@ public:
 	void OnMenuSelection( ERemoteStorageSyncMenuCommand selection );
 
 private:
-	void CheckState();
-
-	enum ERemoteStorageState
-	{
-		k_ERemoteStorageStateIdle,
-		k_ERemoteStorageStateSyncToClient,
-		k_ERemoteStorageStateDisplayMessage,
-		k_ERemoteStorageStateSyncToServer,
-	};
-
 	IGameEngine *m_pGameEngine;
-	ERemoteStorageState m_eState;
-	IRemoteStorageSync *m_pRemoteStorageSync;
 	CRemoteStorageScreen *m_pRemoteStorageScreen;
 };
 
@@ -83,6 +69,8 @@ public:
 private:
 	void GetFileStats();
 	void LoadMessage();
+	bool BHandleSelect();
+	bool BHandleCancel();
 
 	// Game engine
 	IGameEngine *m_pGameEngine;
@@ -103,8 +91,8 @@ private:
 	bool m_bFinished;
 
 	int32 m_nNumFilesInCloud;
-	int32 m_nBytesQuota;
-	int32 m_nAvailableBytes;
+	uint64 m_ulBytesQuota;
+	uint64 m_ulAvailableBytes;
 };
 
 

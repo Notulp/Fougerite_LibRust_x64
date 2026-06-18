@@ -545,7 +545,7 @@ EXPORT bool Steam_ServerStartup(int port, int protocol)
     char versionString[32];
     sprintf_s(versionString, "%d", protocol);
 
-    bool result = SteamGameServer_Init(0, 8766, port, g_RconPort, eServerModeAuthenticationAndSecure, versionString);
+    bool result = SteamGameServer_Init(0, port, g_RconPort, eServerModeAuthenticationAndSecure, versionString);
     if (result)
     {
         g_pCallbacks = new CSteamCallbacks();
@@ -643,7 +643,8 @@ EXPORT uint32_t SteamServer_GetPublicIP()
 {
     if (SteamGameServer())
     {
-        return SteamGameServer()->GetPublicIP();
+        SteamIPAddress_t ip = SteamGameServer()->GetPublicIP();
+        return ip.m_unIPv4;
     }
     return 0;
 }

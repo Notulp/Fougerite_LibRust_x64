@@ -8,6 +8,7 @@
 #ifndef SPACEWAR_H
 #define SPACEWAR_H
 
+
 // The Steamworks API's are modular, you can use some subsystems without using others
 // When USE_GS_AUTH_API is defined you get the following Steam features:
 // - Strong user authentication and authorization
@@ -30,9 +31,6 @@
 
 // Current game server version
 #define SPACEWAR_SERVER_VERSION "1.0.0.0"
-
-// UDP port for the spacewar server to do authentication on (ie, talk to Steam on)
-#define SPACEWAR_AUTHENTICATION_PORT 8766
 
 // UDP port for the spacewar server to listen on
 #define SPACEWAR_SERVER_PORT 27015
@@ -62,7 +60,7 @@
 #define PHOTON_BEAM_FIRE_INTERVAL_TICKS 250
 
 // Amount of space needed for beams per ship
-#define MAX_PHOTON_BEAMS_PER_SHIP PHOTON_BEAM_LIFETIME_IN_TICKS/PHOTON_BEAM_FIRE_INTERVAL_TICKS
+#define MAX_PHOTON_BEAMS_PER_SHIP (PHOTON_BEAM_LIFETIME_IN_TICKS/PHOTON_BEAM_FIRE_INTERVAL_TICKS)
 
 // Time to timeout a connection attempt in
 #define MILLISECONDS_CONNECTION_TIMEOUT 30000
@@ -93,7 +91,7 @@ inline T DWordSwap( T dw )
 {
 	uint32 temp;
 
-	temp  =   *((uint32 *)&dw) 				>> 24;
+	temp  =   *((uint32 *)&dw)               >> 24;
 	temp |= ((*((uint32 *)&dw) & 0x00FF0000) >> 8);
 	temp |= ((*((uint32 *)&dw) & 0x0000FF00) << 8);
 	temp |= ((*((uint32 *)&dw) & 0x000000FF) << 24);
@@ -106,7 +104,7 @@ inline T QWordSwap( T dw )
 {
 	uint64 temp;
 
-	temp  =   *((uint64 *)&dw) 				         >> 56;
+	temp  =   *((uint64 *)&dw)                          >> 56;
 	temp |= ((*((uint64 *)&dw) & 0x00FF000000000000ull) >> 40);
 	temp |= ((*((uint64 *)&dw) & 0x0000FF0000000000ull) >> 24);
 	temp |= ((*((uint64 *)&dw) & 0x000000FF00000000ull) >> 8);
@@ -118,26 +116,12 @@ inline T QWordSwap( T dw )
 	return *((T*)&temp);
 }
 
-#ifndef _PS3
-
 #define LittleInt16( val )	( val )
 #define LittleWord( val )	( val )
 #define LittleInt32( val )	( val )
 #define LittleDWord( val )	( val )
 #define LittleQWord( val )	( val )
 #define LittleFloat( val )	( val )
-
-#else
-
-#define LittleInt16( val )	WordSwap( val )
-#define LittleWord( val )	WordSwap( val )
-#define LittleInt32( val )	DWordSwap( val )
-#define LittleDWord( val )	DWordSwap( val )
-#define LittleQWord( val )	QWordSwap( val )
-#define LittleFloat( val )	DWordSwap( val )
-
-#endif
-
 
 // Leaderboard names
 #define LEADERBOARD_QUICKEST_WIN "Quickest Win"
@@ -177,14 +161,17 @@ enum EClientGameState
 	k_EClientFindLANServers,
 	k_EClientRemoteStorage,
 	k_EClientLeaderboards,
+	k_EClientFriendsList,
 	k_EClientMinidump,
-	k_EClientConnectingToSteam,
-	k_EClientLinkSteamAccount,
-	k_EClientAutoCreateAccount,
-	k_EClientRetrySteamConnection,
 	k_EClientClanChatRoom,
 	k_EClientWebCallback,
 	k_EClientMusic,
+	k_EClientWorkshop,
+	k_EClientHTMLSurface,
+	k_EClientInGameStore,
+	k_EClientRemotePlayInvite,
+	k_EClientRemotePlaySessions,
+	k_EClientOverlayAPI,
 };
 
 
@@ -278,6 +265,24 @@ struct ServerShipUpdateData_t
 	void SetReverseThrustersActive( bool bActive ) { m_bReverseThrustersActive = bActive; }
 	bool GetReverseThrustersActive() { return m_bReverseThrustersActive; }
 
+	void SetDecoration( int nDecoration ) { m_nShipDecoration = nDecoration;  }
+	int GetDecoration() { return m_nShipDecoration; }
+
+	void SetWeapon( int nWeapon ) { m_nShipWeapon = nWeapon;  }
+	int GetWeapon() { return m_nShipWeapon; }
+
+	void SetPower( int nPower ) { m_nShipPower = nPower;  }
+	int GetPower() { return m_nShipPower; }
+
+	void SetShieldStrength( int nShieldStrength ) { m_nShieldStrength = nShieldStrength;  }
+	int GetShieldStrength() { return m_nShieldStrength; }
+
+	void SetThrustersLevel( float fLevel ) { m_fThrusterLevel = fLevel; }
+	float GetThrustersLevel( ) { return m_fThrusterLevel; }
+
+	void SetTurnSpeed( float fSpeed ) { m_fTurnSpeed = fSpeed; }
+	float GetTurnSpeed( ) { return m_fTurnSpeed; }
+
 	ServerPhotonBeamUpdateData_t *AccessPhotonBeamData( int iIndex ) { return &m_PhotonBeamData[iIndex]; }
 
 private:
@@ -309,8 +314,22 @@ private:
 	bool m_bForwardThrustersActive;
 	bool m_bReverseThrustersActive;
 
+	// Decoration for this ship
+	int m_nShipDecoration;
+
+	// Weapon for this ship
+	int m_nShipWeapon;
+
+	// Power for this ship
+	int m_nShipPower;
+	int m_nShieldStrength;
+
 	// Photon beam positions and data
 	ServerPhotonBeamUpdateData_t m_PhotonBeamData[MAX_PHOTON_BEAMS_PER_SHIP];
+
+	// Thrust and rotation speed can be anlog when using a Steam Controller
+	float m_fThrusterLevel;
+	float m_fTurnSpeed;
 };
 
 
@@ -358,7 +377,7 @@ private:
 // This is the data that gets sent from each client to the server for each update
 struct ClientSpaceWarUpdateData_t
 {
-	void SetPlayerName( const char *pchName ) { strncpy( m_rgchPlayerName, pchName, sizeof( m_rgchPlayerName ) ); }
+	void SetPlayerName( const char *pchName ) { strncpy_safe( m_rgchPlayerName, pchName, sizeof( m_rgchPlayerName ) ); }
 	const char *GetPlayerName() { return m_rgchPlayerName; }
 
 	void SetFirePressed( bool bIsPressed ) { m_bFirePressed = bIsPressed; }
@@ -376,6 +395,24 @@ struct ClientSpaceWarUpdateData_t
 	void SetReverseThrustersPressed( bool bIsPressed ) { m_bReverseThrustersPressed = bIsPressed; }
 	bool GetReverseThrustersPressed() { return m_bReverseThrustersPressed; }
 
+	void SetDecoration( int nDecoration ) { m_nShipDecoration = nDecoration;  }
+	int GetDecoration() { return m_nShipDecoration; }
+
+	void SetWeapon( int nWeapon ) { m_nShipWeapon = nWeapon;  }
+	int GetWeapon() { return m_nShipWeapon; }
+
+	void SetPower( int nPower ) { m_nShipPower = nPower;  }
+	int GetPower() { return m_nShipPower; }
+
+	void SetShieldStrength( int nShieldPower ) { m_nShieldStrength = nShieldPower;  }
+	int GetShieldStrength() { return m_nShieldStrength; }
+
+	void SetThrustersLevel( float fLevel ) { m_fThrusterLevel = fLevel; }
+	float GetThrustersLevel( ) { return m_fThrusterLevel; }
+
+	void SetTurnSpeed( float fSpeed ) { m_fTurnSpeed = fSpeed; }
+	float GetTurnSpeed( ) { return m_fTurnSpeed; }
+
 private:
 	// Key's which are done
 	bool m_bFirePressed;
@@ -384,9 +421,24 @@ private:
 	bool m_bForwardThrustersPressed;
 	bool m_bReverseThrustersPressed;
 
+	// Decoration for this ship
+	int m_nShipDecoration;
+
+	// Weapon for this ship
+	int m_nShipWeapon;
+
+	// Power for this ship
+	int m_nShipPower;
+
+	int m_nShieldStrength;
+
 	// Name of the player (needed server side to tell master server about)
 	// bugbug jmccaskey - Really lame to send this every update instead of event driven...
 	char m_rgchPlayerName[64];
+
+	// Thrust and rotation speed can be anlog when using a Steam Controller
+	float m_fThrusterLevel;
+	float m_fTurnSpeed;
 };
 
 #pragma pack( pop )

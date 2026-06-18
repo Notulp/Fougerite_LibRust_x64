@@ -7,6 +7,11 @@
 #include "glmgrbasics.h"
 #include "dxabstract.h"
 
+#ifdef OSX
+// Debugger - 10.8
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 #if __MAC_OS_X_VERSION_MAX_ALLOWED <= __MAC_10_6
 #include <OpenGL/CGLProfiler.h>
 #include <OpenGL/CGLProfilerFunctionEnum.h>
@@ -529,7 +534,9 @@ GLMValueEntry_t g_d3d_vtxdeclusages_short[] =
 	{ D3DDECLUSAGE_SAMPLE		,"M" }
 };
 
-GLMValueEntry_t	g_cgl_rendids[] =			// need to mask with 0xFFFFFF00 to match on these (ex: 8800GT == 0x00022608 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+GLMValueEntry_t	g_cgl_rendids[] =			// need to mask with 0xFFFFFF00 to match on these (ex: 8800GT == 0x00022608
 {
 	VE( kCGLRendererGenericID ),
 	VE( kCGLRendererGenericFloatID ),
@@ -551,6 +558,7 @@ GLMValueEntry_t	g_cgl_rendids[] =			// need to mask with 0xFFFFFF00 to match on 
 
 	VE( TERMVALUE )
 };
+#pragma clang diagnostic pop
 
 GLMValueEntry_t g_gl_errors[] = 
 {
@@ -2644,7 +2652,6 @@ int		s_glmStrCursor = 0;
 const char *	GLMDecode( GLMThing_t thingtype, unsigned long value )
 {
 	GLMValueEntry_t *table = NULL;
-	char			isflags = 0;
 
 	switch( thingtype )
 	{
@@ -2798,6 +2805,7 @@ bool	GLMDetectGDB( void )			// aka AmIBeingDebugged()
   
     size = sizeof(info);  
     junk = sysctl(mib, sizeof(mib) / sizeof(*mib), &info, &size, NULL, 0);  
+    (void)junk;
   
     assert(junk == 0);  
   
@@ -2809,9 +2817,6 @@ bool	GLMDetectGDB( void )			// aka AmIBeingDebugged()
 	return result;
 }
 
-
-static uint		g_glmDebugChannelMask = 0;		// which output channels are available (can be more than one)
-static uint		g_glmDebugFlavorMask = 0;		// which message flavors are enabled for output (can be more than one)
 
 uint	GLMDetectAvailableChannels( void )
 {
@@ -2838,9 +2843,11 @@ uint	GLMDetectAvailableChannels( void )
 }
 
 
-static bool	g_debugInitDone	= false;
-
 #if GLMDEBUG
+
+static bool		g_debugInitDone	= false;
+static uint		g_glmDebugChannelMask = 0;		// which output channels are available (can be more than one)
+static uint		g_glmDebugFlavorMask = 0;		// which message flavors are enabled for output (can be more than one)
 
 	// following funcs vanish if GLMDEBUG not set
 
@@ -2852,7 +2859,7 @@ void	GLMDebugInitialize( bool forceReinit )
 		uint channelMask = GLMDetectAvailableChannels();
 		
 		// finally, disable all of them if commandline did not say "enable spew"
-		if (0 /* !CommandLine()->FindParm("-glmspew") */)	//FIXME change back to 1 later
+		if ( ( 0 ) /* !CommandLine()->FindParm("-glmspew") */)	//FIXME change back to 1 later
 		{
 			channelMask = 0;
 		}
@@ -2864,7 +2871,7 @@ void	GLMDebugInitialize( bool forceReinit )
 		if ( channelMask )
 		{
 			// start mostly quiet unless the -glmbootspew option is there
-			if ( 0 /*CommandLine()->FindParm( "-glmbootspew" )*/ )
+			if ( ( 0 ) /*CommandLine()->FindParm( "-glmbootspew" )*/ )
 			{
 				g_glmDebugFlavorMask = 0xFFFFFFFF;
 			}
@@ -3195,12 +3202,11 @@ void GLMPrintText( const char *str, EGLMDebugFlavor flavor, uint options )
 	// walk the text and treat each newline as an indentation opportunity..
 	const char *mark = buf;
 	const char *end = mark + strlen(buf);
-	const char *next = NULL;
-	
+
 	while(mark < end)
 	{
 		// starting at mark, see if there is a newline between there and end
-		char *next = strchr( mark, '\n' );
+		char *next = (char *)strchr( mark, '\n' );
 		const char *printfrom = mark;
 		if (next)
 		{
@@ -3396,6 +3402,8 @@ bool CGLMFileMirror::PollForChanges( void )
 	// snapshot old stat
 	bool		old_exists = m_exists;
 	struct stat	old_stat = m_stat;
+
+	(void)old_exists;
 	
 	UpdateStatInfo();
 	
@@ -3668,12 +3676,12 @@ void	CGLMEditableTextItem::GenHashOfOrigText( void )
 
 void	CGLMEditableTextItem::GenBaseNameAndFullPath(  char *prefix, char *suffix  )
 {
-	// base name is hash digest in hex, plus the suffix.
-	char	temp[5000];
-
 	// bring this code back if you need the live shader edit/debug mode.
-	#if 0	
-		Q_binarytohex( m_origDigest, sizeof(m_origDigest), temp, sizeof( temp ) );
+	#if 0
+		// base name is hash digest in hex, plus the suffix.
+		char	temp[5000];
+
+		V_binarytohex( m_origDigest, sizeof(m_origDigest), temp, sizeof( temp ) );
 		if (suffix)
 		{
 			strcat( temp, suffix );
@@ -3833,7 +3841,7 @@ void	CGLMEditableTextItem::GenMungedText( bool fromMirror )
 
 // resolved.  there is no default section for text that doesn't have a marker in front of it.  mark it or miss it.
 
-CGLMTextSectioner::CGLMTextSectioner( char *text, int textLength, char **markers )
+CGLMTextSectioner::CGLMTextSectioner( const char *text, int textLength, const char **markers )
 {
 	// find lines
 	// for each line, see if it starts with a marker
@@ -3841,16 +3849,16 @@ CGLMTextSectioner::CGLMTextSectioner( char *text, int textLength, char **markers
 
 	GLMTextSection *curSection = NULL;		// no current section until we see a marker
 	
-	char *cursor = text;
-	char *textLimit = text+textLength;
+	const char *cursor = text;
+	const char *textLimit = text+textLength;
 	
 	int foundMarker;
-	char **markerCursor;
+	const char **markerCursor;
 	while( cursor < textLimit )
 	{
 		// top of loop.  cursor points to start of a line.
 		// find the end of the line and keep that handy.
-		char *eol = strchr( cursor, '\n' );
+		const char *eol = strchr( cursor, '\n' );
 		int charsInLine = (eol) ? (eol-cursor)+1 : strlen(cursor);
 		
 		//see if any of the marker strings is located here.

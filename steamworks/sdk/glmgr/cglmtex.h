@@ -24,13 +24,13 @@ class	CGLMTexLayoutTable;
 class	CGLMTex;
 class	CGLMFBO;
 
-class	IDirect3DSurface9;
+struct	IDirect3DSurface9;
 
 //===============================================================================
 
 struct GLMTexFormatDesc
 {
-	char		*m_formatSummary;	// for debug visibility
+	const char		*m_formatSummary;	// for debug visibility
 	
 	D3DFORMAT	m_d3dFormat;		// what D3D knows it as; see public/bitmap/imageformat.h
 	
@@ -101,7 +101,7 @@ struct GLMTexLayoutKey
 
 struct LessThan_GLMTexLayoutKey
 {
-	bool operator()(const GLMTexLayoutKey &a, const GLMTexLayoutKey &b)
+	bool operator()(const GLMTexLayoutKey &a, const GLMTexLayoutKey &b) const
 	{
 		#define	DO_LESS(fff) if (a.fff != b.fff) { return (a.fff< b.fff); }
 	
@@ -233,14 +233,14 @@ protected:
 	friend class GLMTester;
 	friend class CGLMFBO;
 
-	friend class IDirect3DDevice9;
-	friend class IDirect3DBaseTexture9;
-	friend class IDirect3DTexture9;
-	friend class IDirect3DSurface9;
-	friend class IDirect3DCubeTexture9;
-	friend class IDirect3DVolumeTexture9;
+	friend struct IDirect3DDevice9;
+	friend struct IDirect3DBaseTexture9;
+	friend struct IDirect3DTexture9;
+	friend struct IDirect3DSurface9;
+	friend struct IDirect3DCubeTexture9;
+	friend struct IDirect3DVolumeTexture9;
 	
-			CGLMTex( GLMContext *ctx, GLMTexLayout *layout, GLMTexSamplingParams *sampling, char *debugLabel = NULL );
+			CGLMTex( GLMContext *ctx, GLMTexLayout *layout, GLMTexSamplingParams *sampling, const char *debugLabel = NULL );
 			~CGLMTex( );
 	
 	int						CalcSliceIndex( int face, int mip );

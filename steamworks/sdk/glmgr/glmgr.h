@@ -442,7 +442,6 @@ template<typename T, int COUNT> class GLStateArray
 
 		bool Check( void )
 		{
-			T		temp;
 			bool	result = false;
 
 			for( int i=0; i<COUNT; i++)
@@ -654,7 +653,7 @@ class	GLMContext
 
 		// textures
 		// Lock and Unlock reqs go directly to the tex object
-		CGLMTex	*NewTex( GLMTexLayoutKey *key, char *debugLabel=NULL );
+		CGLMTex	*NewTex( GLMTexLayoutKey *key, const char *debugLabel=NULL );
 		void	DelTex( CGLMTex	*tex );	
 
 			// options for Blit (replacement for ResolveTex and BlitTex)
@@ -790,8 +789,8 @@ class	GLMContext
 		friend class CGLMBuffer;
 		friend class GLMTester;			// tester class needs access back into GLMContext
 		
-		friend class IDirect3D9;
-		friend class IDirect3DDevice9;
+		friend struct IDirect3D9;
+		friend struct IDirect3DDevice9;
 		
 		// methods------------------------------------------
 		

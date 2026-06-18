@@ -13,6 +13,12 @@ extern CGameEngineGL *g_engine;		// so glmgr (which is C++) can call up to the g
 
 #ifdef __clang__
 #pragma clang diagnostic warning "-Wint-to-pointer-cast"
+#pragma clang diagnostic ignored "-Wunused-variable"
+#endif
+
+#ifdef OSX
+// Debugger - 10.8
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
 
 
@@ -296,7 +302,7 @@ GLMContext *GLMgr::GetCurrentContext( void )
 	
 	if ( glm_context_link )
 	{
-		return (GLMContext*) glm_context_link;
+		return (GLMContext*)(uintptr_t)glm_context_link;
 	}
 	else
 	{
@@ -506,7 +512,7 @@ void	DefaultSamplingParams( GLMTexSamplingParams *samp, GLMTexLayoutKey *key )
 	samp->m_srgb = false;
 }
 
-CGLMTex	*GLMContext::NewTex( GLMTexLayoutKey *key, char *debugLabel )
+CGLMTex	*GLMContext::NewTex( GLMTexLayoutKey *key, const char *debugLabel )
 {
 	//hushed GLM_FUNC;
 	MakeCurrent();
@@ -1267,6 +1273,8 @@ void	GLMContext::ResolveTex( CGLMTex *tex, bool forceDirty )
 		
 		// for resolve, only handle a modest subset of the possible formats
 		EGLMFBOAttachment	attachIndex = (EGLMFBOAttachment)0;
+		(void)attachIndex;
+
 		GLenum				attachIndexGL = 0;
 		GLuint				blitMask = 0;
 		switch( tex->m_layout->m_format->m_glDataFormat )
@@ -1752,7 +1760,7 @@ void	GLMContext::QueryShaderPair( int index, GLMShaderPairInfo *infoOut )
 	}
 	else
 	{
-		memset( infoOut, sizeof( *infoOut ), 0 );
+		memset( infoOut, 0, sizeof( *infoOut ) );
 		infoOut->m_status = -1;
 	}
 }
@@ -1934,7 +1942,7 @@ void	GLMContext::Clear( bool color, unsigned long colorValue, bool depth, float 
 
 		GLClearColor_t clearcol;
 		GLClearDepth_t cleardep = { depthValue };
-		GLClearStencil_t clearsten = { stencilValue };
+		GLClearStencil_t clearsten = { (GLint)stencilValue };
 
 		// depth write mask must be saved&restored
 		GLDepthMask_t			olddepthmask;
@@ -1942,7 +1950,7 @@ void	GLMContext::Clear( bool color, unsigned long colorValue, bool depth, float 
 
 		// stencil write mask must be saved and restored
 		GLStencilWriteMask_t			oldstenmask;
-		GLStencilWriteMask_t			newstenmask = { 0xFFFFFFFF };
+		GLStencilWriteMask_t			newstenmask = { ~(GLint)0 };
 		
 		GLColorMaskSingle_t		oldcolormask;
 		GLColorMaskSingle_t		newcolormask = { -1,-1,-1,-1 };	// D3D clears do not honor color mask, so force it
@@ -1996,7 +2004,7 @@ void	GLMContext::Clear( bool color, unsigned long colorValue, bool depth, float 
 			m_ScissorEnable.Read( &scissorEnableSave, 0 );
 			m_ScissorBox.Read( &scissorBoxSave, 0 );
 			
-			if(0)
+			if ( ( 0 ) )
 			{
 				// calc new scissorbox as intersection against *box
 
@@ -2382,17 +2390,23 @@ GLMContext::GLMContext( GLMDisplayParams *params )
 		// this is the old 10.5.x two-context path.... ugh
 		success = NewNSGLContext( (unsigned long*)selAttribs, shareNsCtx, &m_nsctx, &m_ctx );
 	}
-	
+
+	// If we're compiling for 64-bit with a 32-bit GLint we should only allow the conversion
+	// between 'this' and GLint if it can fit in the GLint, otherwise consider this to be failure
+	if ( sizeof(this) > sizeof(GLint) )
+    	success = ( (uintptr_t)this & 0xFFFFFFFF00000000 ) == 0;
+
 	if (success)
 	{
 		//write a cookie into the CGL context leading back to the GLM context object
 		GLint	glm_context_link = (GLint)((uintptr_t)this);
 		CGLSetParameter( m_ctx, kCGLCPClientStorage, &glm_context_link );
-		
-		// save off the pixel format attributes we used		
+
+		// save off the pixel format attributes we used
 		memcpy(m_pixelFormatAttribs, selAttribs, selBytes );
 	}
-	else
+
+	if ( !success )
 	{
 		Debugger(); //FIXME #PMB# bad news, maybe exit to shell if this happens
 	}
@@ -2812,6 +2826,9 @@ void	GLMContext::BindBufferToCtx( EGLMBufferType type, CGLMBuffer *buff, bool fo
 	
 	bool wasBound = false;
 	bool isBound = false;
+
+	(void)wasBound;
+	(void)isBound;
 	
 	if (m_lastKnownBufferBinds[type])
 	{
@@ -2868,7 +2885,6 @@ void	GLMContext::FlushDrawStates( bool shadersOn )	// shadersOn = true for draw 
 	
 	// if drawing FBO has any MSAA attachments, mark them dirty
 	{
-		CGLMTex *tex;
 		for( int att=kAttColor0; att<kAttCount; att++)
 		{
 			if (m_drawingFBO->m_attach[ att ].m_tex)
@@ -3104,7 +3120,7 @@ void	GLMContext::FlushDrawStates( bool shadersOn )	// shadersOn = true for draw 
 						glEnableVertexAttribArray( index );							// enable attribute, set pointer.
 						GLMCheckError();
 
-						glVertexAttribPointer( index, setdesc->m_datasize, setdesc->m_datatype, setdesc->m_normalized, setdesc->m_stride, (	const GLvoid *)setdesc->m_offset );
+						glVertexAttribPointer( index, setdesc->m_datasize, setdesc->m_datatype, setdesc->m_normalized, setdesc->m_stride, (const GLvoid *)(uintptr_t)setdesc->m_offset );
 						GLMCheckError();
 						//GLMPRINTF(("--- GLMContext::SetVertexAttributes attr %d set to offset/stride %d/%d in buffer %d (normalized=%s)", index, setdesc->m_offset, setdesc->m_stride, setdesc->m_buffer->m_name, setdesc->m_normalized?"true":"false" ));
 					}
@@ -3220,6 +3236,12 @@ void	GLMContext::FlushDrawStates( bool shadersOn )	// shadersOn = true for draw 
 					#if GLMDEBUG
 						static uint paramsPushed=0,paramsSkipped=0,callsPushed=0;	// things that happened on pushed param trips
 						static uint callsSkipped=0,paramsSkippedByCallSkip=0;		// on unpushed param trips (zero dirty)
+
+						(void)paramsPushed;
+						(void)paramsSkipped;
+						(void)callsPushed;
+						(void)callsSkipped;
+						(void)paramsSkippedByCallSkip;
 					#endif
 					
 					int slotCountToPush	= 0;
@@ -3358,6 +3380,9 @@ void	GLMContext::FlushDrawStates( bool shadersOn )	// shadersOn = true for draw 
 							
 							case eAttribWriteDirty:
 								static uint hits=0,misses=0;
+								(void)hits;
+								(void)misses;
+
 								// first see if we have to do anything at all.
 								// the equality operator checks buffer name, offset, stride, datatype and normalized.
 								// we check buffer revision separately, submitter of vertex setup is not expected to provide it (zero is preferred).
@@ -3402,7 +3427,7 @@ void	GLMContext::FlushDrawStates( bool shadersOn )	// shadersOn = true for draw 
 								loopCurrentBuf = buf;
 							}
 
-							glVertexAttribPointer( index, newDesc->m_datasize, newDesc->m_datatype, newDesc->m_normalized, newDesc->m_stride, (	const GLvoid *)newDesc->m_offset );
+							glVertexAttribPointer( index, newDesc->m_datasize, newDesc->m_datatype, newDesc->m_normalized, newDesc->m_stride, (const GLvoid *)(uintptr_t)newDesc->m_offset );
 							GLMCheckError();
 						}
 						
@@ -3437,6 +3462,12 @@ void	GLMContext::FlushDrawStates( bool shadersOn )	// shadersOn = true for draw 
 					#if GLMDEBUG
 						static uint paramsPushed=0,paramsSkipped=0,callsPushed=0;	// things that happened on pushed param trips
 						static uint callsSkipped=0,paramsSkippedByCallSkip=0;		// on unpushed param trips (zero dirty)
+
+						(void)paramsPushed;
+						(void)paramsSkipped;
+						(void)callsPushed;
+						(void)callsSkipped;
+						(void)paramsSkippedByCallSkip;
 					#endif
 					
 					int slotCountToPush	= 0;
@@ -3533,6 +3564,9 @@ void	GLMContext::FlushDrawStates( bool shadersOn )	// shadersOn = true for draw 
 				}
 			}
 			break;
+				
+    		default:
+			break;
 		}
 	}
 	else
@@ -3569,7 +3603,7 @@ enum EGLMVertDumpMode
 	eLastDumpVertsMode
 };
 
-char *g_vertDumpModeNames[] = 
+const char *g_vertDumpModeNames[] =
 {
 	"noTransformDump",
 	"transformedByViewProj",
@@ -3691,7 +3725,7 @@ void	GLMContext::DebugDump( GLMDebugHookInfo *info, uint options, uint vertDumpM
 				strcpy( transtemp, "no translation info" );
 			}
 			
-			char *linkpath = "no file link";
+			const char *linkpath = "no file link";
 
 			#if GLMDEBUG && 0 // no editable shader support in example code
 				linkpath = vp->m_editable->m_mirror->m_path;
@@ -3728,7 +3762,7 @@ void	GLMContext::DebugDump( GLMDebugHookInfo *info, uint options, uint vertDumpM
 				strcpy( transtemp, "no translation info" );
 			}
 			
-			char *linkpath = "no file link";
+			const char *linkpath = "no file link";
 
 			#if GLMDEBUG && 0 // no editable shader support in example code
 				linkpath = fp->m_editable->m_mirror->m_path;
@@ -3757,7 +3791,7 @@ void	GLMContext::DebugDump( GLMDebugHookInfo *info, uint options, uint vertDumpM
 	{
 		GLMPRINTF(("-D-"));
 		GLMPRINTF(("-D- VP parameters" ));
-		char *label = "";
+		const char *label = "";
 		int labelcounter = 0;
 		
 		static int vmaskranges[] = { /*18,47,*/ -1,-1 };
@@ -4073,7 +4107,7 @@ void	GLMContext::DebugDump( GLMDebugHookInfo *info, uint options, uint vertDumpM
 						{
 							for( int which = 0; which < desc->m_datasize; which++ )
 							{
-								static char *fieldname = "xyzw";
+								static const char *fieldname = "xyzw";
 								switch( desc->m_datatype )
 								{
 									case GL_FLOAT:
@@ -4161,7 +4195,7 @@ void	GLMContext::DebugDump( GLMDebugHookInfo *info, uint options, uint vertDumpM
 			{
 				// if transform dumping requested, and we've reached the actual vert dump phase, do it
 				float	vtxout[4];
-				char	*translabel = NULL;   // NULL means no print...
+				const char	*translabel = NULL;   // NULL means no print...
 				
 				switch( g_vertDumpMode )
 				{
@@ -4229,6 +4263,9 @@ void	GLMContext::DebugDump( GLMDebugHookInfo *info, uint options, uint vertDumpM
 						translabel = "post-skin3bone-viewproj";
 					}
 					break;
+
+					default:
+					break;
 				}
 				if(translabel)
 				{
@@ -4276,7 +4313,7 @@ void	GLMContext::DebugDump( GLMDebugHookInfo *info, uint options, uint vertDumpM
 }
 
 // here is the table that binds knob numbers to names.  change at will.
-char	*g_knobnames[] = 
+const char	*g_knobnames[] =
 {
 /*0*/	"dummy",
 
@@ -5288,7 +5325,7 @@ void	GLMContext::DrawDebugText( float x, float y, float z, float drawCharWidth, 
 	glEnable(GL_TEXTURE_2D);
 	GLMCheckError();
 
-	if (0)
+	if ( ( 0 ) )
 	{
 		glEnableClientState(GL_VERTEX_ARRAY);
 		GLMCheckError();
@@ -5314,7 +5351,7 @@ void	GLMContext::DrawDebugText( float x, float y, float z, float drawCharWidth, 
 	GLMCheckError();
 
 	// disable all the input streams
-	if (0)
+	if ( ( 0 ) )
 	{
 		glDisableClientState(GL_VERTEX_ARRAY);
 		GLMCheckError();
@@ -5339,8 +5376,9 @@ void	GLMContext::DrawDebugText( float x, float y, float z, float drawCharWidth, 
 
 void GLMgrSelfTests( void )	
 {
-	return;	// until such time as the tests are revised or axed
-	
+// until such time as the tests are revised or axed
+#if 0
+
 	// make a new context on renderer 0.
 	GLMContext *ctx = GLMgr::aGLMgr()->NewContext( 0 );	////FIXME you can't make contexts this way any more.
 	if (!ctx)
@@ -5375,6 +5413,7 @@ void GLMgrSelfTests( void )
 	testobj.RunTests( );
 	
 	GLMgr::aGLMgr()->DelContext( ctx );
+#endif
 }
 
 void GLMContext::SetDefaultStates( void )
@@ -6923,7 +6962,7 @@ void	GLMTester::Test2( void )
 	for( int i=0; i<m_params.m_frameCount; i++)
 	{
 		// ramping shades of blue...
-		GLfloat clear_color[4] = { 0.50f, 0.05f, ((float)(i%100)) / 100.0, 1.0f };		
+		GLfloat clear_color[4] = { 0.50f, 0.05f, ((float)(i%100)) / 100.0f, 1.0f };
 		glClearColor(clear_color[0], clear_color[1], clear_color[2], clear_color[3]);
 		CheckGLError("test2 clear color");
 

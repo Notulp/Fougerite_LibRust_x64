@@ -1,6 +1,6 @@
 ================================================================
 
-Copyright © 1996-2014, Valve Corporation, All rights reserved.
+Copyright © 1996-2025, Valve Corporation, All rights reserved.
 
 ================================================================
 
@@ -9,7 +9,690 @@ Welcome to the Steamworks SDK.  For documentation please see our partner
 website at: http://partner.steamgames.com
 
 
+----------------------------------------------------------------
+v1.64 11th March 2026
+----------------------------------------------------------------
+
+General:
+* androidarm64 libs now statically link libc++
+* androidarm64 libs now use 16KB max page size (from 4KB)
+* linuxarm64 libs now use 4KB max page size (from 64KB)
+
+ISteamApps:
+* Added last update timestamp to GetBetaInfo()
+
+ISteamUGC:
+* Added MarkDownloadedItemAsUnused()
+* Added GetDownloadedItems(), GetNumDownloadedItems()
+
+ISteamRemotePlay:
+* Added BSessionRemotePlayTogether()
+* Added GetSessionGuestID()
+* Added GetSmallSessionAvatar(), GetMediumSessionAvatar(), GetLargeSessionAvatar()
+* Added SteamRemotePlaySessionAvatarLoaded_t callback
+
+
+----------------------------------------------------------------
+v1.63 18th November 2025
+----------------------------------------------------------------
+
+General:
+* Added libs for linuxarm64 and androidarm64.
+* ISteamMusicRemote has been removed.
+
+ISteamController:
+* Added controller action origins for Lenovo Legion Go.
+* Added controller action origins for generic controller.
+
+ISteamInput:
+* Added input action origins for Lenovo Legion Go.
+* Added input action origins for generic controller.
+
+ISteamRemotePlay:
+* Added keypad scancode values.
+
+ISteamUser:
+* GetMarketEligibility may now return new k_EMarketNotAllowedReason_TradeCooldown status code in MarketEligibilityResponse_t.
+
+
+----------------------------------------------------------------
+v1.62 14th March 2025
+----------------------------------------------------------------
+
+ISteamFriends:
+* Removed SetPersonaName() and GetUserRestrictions().
+
+ISteamHTMLSurface:
+* Renamed EMouseCursor to EHTMLMouseCursor, and renamed values to match.
+
+ISteamRemotePlay:
+* Removed BStartRemotePlayTogether() since it's always available when a supported game launches.
+* Added ShowRemotePlayTogetherUI() to show the Remote Play Together UI in the game overlay.
+* Added functions to get remote keyboard and mouse input directly instead of simulating local input: BEnableRemotePlayTogetherDirectInput(), DisableRemotePlayTogetherDirectInput(), GetInput(), SetMouseVisibility(), SetMousePosition(), CreateMouseCursor(), SetMouseCursor().
+
+ISteamUGC:
+* Added SetSubscriptionsLoadOrder() to allow changing the load order.
+* Added SetItemsDisabledLocally() set an item as locally disabled or not.
+* GetNumSubscribedItems() and GetSubscribedItems() also takes an optional boolean to return locally disabled items as well.
+
+
+----------------------------------------------------------------
+v1.61 8th November 2024
+----------------------------------------------------------------
+
+ISteamTimeline:
+* Renamed Set/ClearTimelineStateDescription to Set/ClearTimelineTooltip to make it more clear where the text will appear.
+* Renamed AddTimelineEvent to AddInstantaneousTimelineEvent and removed the duration parameter.
+* Added AddRangeTimelineEvent for adding a a timeline event that happens over a period of time.
+* Added Start/Update/EndRangeTimelineEvent calls for situations where the caller doesn't know when the event will end before creating it.
+* Added RemoveTimelineEvent to let the game remove an event it previously added
+* Added DoesEventRecordingExist/OpenOverlayToTimelineEvent, which allow the game to show an event in the Steam overlay
+* Added Start/EndGamePhase, along with some supporting functions, to let the game identify meaningful time ranges like multiplayer matches or chapters in a single player game. See the Timeline documentation for more information.
+
+ISteamUserStats:
+* RequestCurrentStats is no longer necessary and has been removed. The Steam Client will synchronize this data before your game launches.
+
+ISteamInput:
+* Added glyph support for the Wireless HORIPAD for Steam
+
+
+----------------------------------------------------------------
+v1.60 19th June 2024
+----------------------------------------------------------------
+
+General
+* CSteamAPIContext has been removed. Please switch to using the Steam<interface> accessors where appropriate.
+
+ISteamTimeline
+* Added this new interface to allow games to provide information that supports the new Game Recording feature. See the [url=https://partner.steamgames.com/doc/features/timeline]Timeline[/url] documentation for more information.
+
+ISteamUGC
+* Added 64 bit m_ulTotalFilesSize to SteamUGCDetails_t which is the correct size of the content for Workshop items are larger than 2,147,483,647 bytes.
+* Added GetNumSupportedGameVersions() and GetSupportedGameVersionData() which can be used to determine what game beta branches a Workshop item supports/is valid for.
+* Added SetAdminQuery() to allow ISteamUGC to be used in a tools like environment for users who have the appropriate privileges for the calling appid.
+
+ISteamApps
+* Added API to allow the game to manage active beta branches. 
+
+
+----------------------------------------------------------------
+v1.59 9th February 2024
+----------------------------------------------------------------
+General
+* Added new initialization method, SteamAPI_InitFlat
+
+ISteamUtils
+* Added DismissGamepadTextInput
+
+ISteamAppList
+* This interface has been removed from the SDK
+
+----------------------------------------------------------------
+v1.58a 26th October 2023
+----------------------------------------------------------------
+Fixes to steam_api_flat.h
+
+----------------------------------------------------------------
+v1.58 15th September 2023
+----------------------------------------------------------------
+ISteamRemotePlay
+* Added BStartRemotePlayTogether to start Remote Play Together and optionally show the UI in the overlay
+
+ISteamUGC
+* The function SetItemTags now takes in a parameter to allow the modification of admin tags through the SDK if the logged-in user has the appropriate permissions
+* Added GetUserContentDescriptorPreferences, which can be used to show the user their current set of preferences and then direct them to Steam to modify them at https://store.steampowered.com/account/preferences/
+
+Misc.
+* Added SteamAPI_InitEx and SteamGameServer_InitEx, which will return k_ESteamAPIInitResult_OK upon success or an error code specified in in ESteamAPIInitResult. An optional, non-localized error message can also be returned.
+* SteamAPI_Init() will now return false if the installed Steam client needs to be updated to support the game’s version of the SDK
+* Improved handling of corrupted tickets via updated sdkencryptedappticket.lib
+
+----------------------------------------------------------------
+v1.57 28th April 2022
+----------------------------------------------------------------
+User
+* Updated ISteamUser::GetAuthTicketForWebApi(), To create a ticket for use by the AuthenticateUserTicket Web API
+* Updated ISteamUser::GetAuthSessionTicket(), No longer to be used to create a ticket for use by the AuthenticateUserTicket Web API
+
+----------------------------------------------------------------
+v1.56 30th March 2023
+----------------------------------------------------------------
+User
+* Updated ISteamUser::GetAuthSessionTicket(), Add parameter SteamNetworkingIdentity 
+
+----------------------------------------------------------------
+v1.55 29th July 2022
+----------------------------------------------------------------
+
+ISteamInput
+* Added SetDualSenseTriggerEffect and corresponding header isteamdualsense.h for setting the adaptive trigger effect on DualSense controllers
+
+Spacewar example:
+* Added an example of using SetDualSenseTriggerEffect
+
+----------------------------------------------------------------
+v1.54 16th June 2022
+----------------------------------------------------------------
+
+ISteamFriends
+* Added various functions to retrieve equipped Steam Community profile items and their properties
+** RequestEquippedProfileItems – requests information on what Steam Community profile items a user has equipped.  Will send callback EquippedProfileItems_t.
+** BHasEquippedProfileItem – after calling RequestEquippedProfileItems, returns true/false depending on whether a user has a ECommunityProfileItemType equipped or not
+** GetProfileItemPropertyString – returns a string property given a ECommunityProfileItemType and ECommunityProfileItemProperty
+** GetProfileItemPropertyUint – returns an unsigned integer property given a ECommunityProfileItemType and ECommunityProfileItemProperty
+* Added callback EquippedProfileItemsChanged_t for when a user's equipped Steam Community profile items have changed.  This will be sent for the current user and for their friends.
+
+Spacewar example:
+* Added examples for how to interact with various overlay related functions (e.g. ActivateGameOverlay, ActivateGameOverlayToUser, ActivateGameOverlayToWebPage, ActivateGameOverlayToStore, ActivateGameOverlayInviteDialogConnectString)
+* Fixed Steam Input example code not working on Linux
+
+----------------------------------------------------------------
+v1.53a 11th December 2021
+----------------------------------------------------------------
+
+macOS
+* Fixed libsdkencryptedappticket.dylib to include arm64 support
+
+----------------------------------------------------------------
+v1.53 23th November 2021
+----------------------------------------------------------------
+
+SteamNetworkingSockets:
+* Added support for connections to have multiple streams of messages, known as "lanes," with mechanisms to control bandwidth utilization and head-of-line blocking between lanes.
+* Added the "FakeIP" system, which can be useful to add P2P networking or Steam Datagram Relay support to games while retaining the assumption that network hosts are identified by an IPv4 address.  Added steamnetworkingfakeip.h and ISteamNetworkingFakeUDPPort
+* Simplified interface for iterating config values.
+* Added SteamNetConnectionInfo_t::m_nFlags, which have misc info about a connection.
+
+ISteamInput
+* Added Steam Deck values to the EInputActionOrigin and ESteamInputType origins
+
+ISteamUGC:
+* Added SetTimeCreatedDateRange and SetTimeUpdatedDateRange
+
+ISteamUtils:
+* Added DismissFloatingGamepadTextInput
+
+Flat Interface:
+* For each interface accessor, there is now an inline, unversioned accessor that calls the versioned accessor exported by the .dll.  This reduces the number of changes that need to be made when updating the SDK and accessing the flat interface directly, while still retaining version safety.
+
+General:
+* Removed definitions for many internal callback IDs that are not needed by general users of the SDK.
+
+Spacewar example:
+* Added CItemStore, which demonstrates how to interact with an in-game store
+
+----------------------------------------------------------------
+v1.52 14th September 2021
+----------------------------------------------------------------
+
+ISteamInput
+* Added support for bundling Steam Input API configurations w/ game depots. Allows developers to use the same configuration file across public/private AppIDs, check configurations into their revision control systems, more easily juggle changes between beta branches, and ensure game/config changes are done in-sync.
+* Added new glyph API support for SVG glyphs and multiple sizes of PNG files. Note: these images will be added in a subsequent Steam Beta Client release.
+* Added support for callbacks for action state changes, controller connect/disconnect, and controller mapping changes.
+* Added BNewDataAvailable function to reduce need to manually compare action data between frames.
+* Added BWaitForData helper function to wait on an event set when controller data is updated.
+* Added functions for getting the localized string for action names (GetStringForDigitalActionName and GetStringForAnalogActionName).
+* Added function to poll current Steam Input enable settings by controller type (GetSessionInputConfigurationSettings).
+
+ISteamGameServer
+* Renamed EnableHeartbeats to SetAdvertiseServerActive.
+* Deprecated the following methods (they have been renamed to *_DEPRECATED and will be removed in a future SDK update):
+** SendUserConnectAndAuthenticate
+** SendUserDisconnect
+** SetMasterServerHeartbeatInterval
+** ForceMasterServerHeartbeat
+
+ISteamRemoteStorage
+* Added GetLocalFileChangeCount and GetLocalFileChange which allows for iterating over Steam Cloud files that have changed locally after the initial sync on app start, when supported by the app.  The callback notification is RemoteStorageLocalFileChange_t.
+* Added BeginFileWriteBatch and EndFileWriteBatch to hint to Steam that a set of files should be written to Steam Cloud together (e.g. a game save that requires updating more than one file).
+* Removed the following unused callbacks: RemoteStorageAppSyncedClient_t, RemoteStorageAppSyncedServer_t, RemoteStorageAppSyncProgress_t, and RemoteStorageAppSyncStatusCheck_t.
+
+ISteamUGC
+* Added ability to sort by "time last updated" (k_EUGCQuery_RankedByLastUpdatedDate).
+* Added ShowWorkshopEULA and GetWorkshopEULAStatus, which allows a game to have a separate EULA for the Steam Workshop.
+* Added UserSubscribedItemsListChanged_t callback.
+* Added WorkshopEULAStatus_t callback, which will be sent asynchronously after calling GetWorkshopEULAStatus.
+
+ISteamUser
+* Deprecated InitiateGameConnection and TerminateGameConnection (renamed to *_DEPRECATED).  Please migrate to BeginAuthSession and EndAuthSession.
+
+ISteamUtils
+* Added IsSteamRunningOnSteamDeck - Can be used to optimize the experience of the game on Steam Deck, such as scaling the UI appropriately, applying performance related settings, etc.
+* Added SetGameLauncherMode - In game launchers that don't have controller support you can call this to have Steam Input translate the controller input into mouse/kb to navigate the launcher.
+* Added AppResumingFromSuspend_t callback - Sent after the device returns from sleep/suspend mode.
+* Added ShowFloatingGamepadTextInput - Activates the modal gamepad input keyboard which pops up over game content and sends OS keyboard keys directly to the game. Note: Currently this is only implemented in the Steam Deck UI.
+* Added FloatingGamepadTextInputDismissed_t callback - Sent after the floating gamepad input keyboard displayed via ShowFloatingGamepadTextInput has been dismissed.
+
+macOS
+* Added i386/x86_64/arm64 universal builds of libsdkencryptedappticket.dylib and libsteam_api.dylib
+
+Steamworks Example Project
+* Updated project to illustrate new Steam Input changes
+* Updated to build properly with macOS 11 SDK for arm64
+* Updated Windows project files to Visual Studio 2015
+* Windows project files now target Windows 8.1
+* Windows project files now set include and library path using DXSDK_DIR
+
+Misc.
+* ISteamAppList - Added m_iInstallFolderIndex to SteamAppInstalled_t and SteamAppUninstalled_t callbacks.
+* ISteamApps - Removed unused SteamGameServerApps() accessor.
+* CSteamGameServerAPIContext - removed SteamApps() accessor.
+* Cleanup of types and enums that were unnecessarily in the SDK.
+
+
+----------------------------------------------------------------
+v1.51 8th January 2021
+----------------------------------------------------------------
+ISteamUGC
+* Added GetQueryUGCNumTags(), GetQueryUGCTag(), and GetQueryUGCTagDisplayName() for access to an item's tags and the display names (e.g. localized versions) of those tags
+* A previous SDK update added (but failed to call out) AddRequiredTagGroup() which allows for matching at least one tag from the group (logical "or")
+
+ISteamInput & ISteamController
+* Added PS5 Action Origins
+
+ISteamFriends
+* Added ActivateGameOverlayInviteDialogConnectString - Activates the game overlay to open an invite dialog that will send the provided Rich Presence connect string to selected friends
+
+Steamworks Example
+* Updated to use latest SteamNetworkingSockets API
+
+Content Builder
+* Updated upload example to use a single script file to upload a simple depot
+
+----------------------------------------------------------------
+v1.50 29th August 2020
+----------------------------------------------------------------
+* Added ISteamUtils::InitFilterText() and ISteamUtils::FilterText() which allow a game to filter content and user-generated text to comply with China legal requirements, and reduce profanity and slurs based on user settings.
+* Added ISteamNetworkingMessages, a new non-connection-oriented API, similar to UDP.  This interface is intended to make it easy to port existing UDP code while taking advantage of the features provided by ISteamNetworkingSockets, especially Steam Datagram Relay (SDR).
+* Added poll groups to ISteamNetworkingSockets.  Poll groups are a way to receive messages from many different connections at a time.
+* ISteamNetworkingSockets::ReceiveMessagesOnListenSocket has been removed.  (Use poll groups instead.)
+* Added symmetric connect mode to ISteamNetworkingSockets.  This can be used to solve the coordination problem of establishing a single connection between two peers, when both peers may initiating the connection at the same time and neither peer is the “server” or “client”.
+* ISteamNetworking is deprecated and may be removed in a future version of the SDK.  Please use ISteamNetworkingSockets or ISteamNetworkingMessages instead.
+
+
+----------------------------------------------------------------
+v1.49 12th June 2020
+----------------------------------------------------------------
+* Added ISteamApps::BIsTimedTrial() which allows a game to check if user only has limited playtime
+* Added ISteamFriends::RegisterProtocolInOverlayBrowser() which will enable dispatching callbacks when the overlay web browser navigates to a registered custom protocol, such as “mygame://<callback data>”
+* Added ISteamuserStats::GetAchievementProgressLimits() which lets the game query at run-time the progress-based achievement’s bounds as set by the developers in the Steamworks application settings
+* Added tool to demonstrate processing the steam.signatures file that comes in the steam client package.
+
+
+----------------------------------------------------------------
+v1.48a 26th March 2020
+----------------------------------------------------------------
+
+macOS
+* Fixed notarization issues caused by missing code signature of libsdkencryptedappticket.dylib
+
+
+----------------------------------------------------------------
+v1.48 12th February 2020
+----------------------------------------------------------------
+
+ISteamNetworkingSockets
+* Added the concept of a "poll group", which is a way to receive messages from many connections at once, efficiently.
+* ReceiveMessagesOnListenSocket was deleted.  To get the same functionality, create a poll group, and then add connections to this poll group when accepting the connection.
+
+Flat interface redesign
+* Fixed many missing interfaces and types.
+* All versions of overloaded functions are now available, using distinct names.
+* There are now simple, global versioned functions to fetch the interfaces.  No more need to mess with HSteamPipes or HSteamUsers directly.
+* The json file now has much more detailed information and several errors have been fixed.
+* steam_api_interop.cs has been removed and will no longer be supported.
+* There is a new manual dispatch API for callbacks, which works similarly to a windows event loop.  This is a replacement for the existing callback registeration and dispatch mechanisms, which which are nice in C++ but awkward to use outside of C++.
+
+
+----------------------------------------------------------------
+v1.47 3rd December 2019
+----------------------------------------------------------------
+
+macOS
+* Updated steamcmd binaries to be 64-bit
+
+ISteamNetworkingSockets
+* Added API to set configuration options atomically, at time of creation of the listen socket or connection
+* Added API to send multiple messages efficiently, without copying the message payload
+* Added API for relayed P2P connections where signaling/rendezvous goes through your own custom backend instead of the Steam servers
+
+ISteamRemotePlay
+* Added a function to invite friends to play via Remote Play Together
+
+
+----------------------------------------------------------------
+v1.46 26th July 2019
+----------------------------------------------------------------
+
+ISteamRemotePlay
+* Added a new interface to get information about Steam Remote Play sessions
+
+ISteamInput
+* Added the GetRemotePlaySessionID function to find out whether a controller is associated with a Steam Remote Play session
+
+
+----------------------------------------------------------------
+v1.45 25th June 2019
+----------------------------------------------------------------
+
+Steam Input and Steam Controller Interfaces
+* Added the GetDeviceBindingRevision function which allows developers of Steam Input API games to detect out of date user configurations. Configurations w/ out of date major revisions should be automatically updated by Steam to the latest official configuration, but configurations w/ out of date minor revisions will be left in-place.
+
+ISteamUser
+* Add duration control APIs to support anti-indulgence regulations in some territories. This includes callbacks when gameplay time thresholds have been passed, and an API to fetch the same data on the fly.
+
+ISteamUtils
+* Add basic text filtering API.
+
+----------------------------------------------------------------
+v1.44 13th March 2019
+----------------------------------------------------------------
+
+ISteamNetworkingSockets
+* Socket-style API that relays traffic on the Valve network
+
+ISteamNetworkingUtils
+* Tools for instantly estimating ping time between two network hosts
+
+----------------------------------------------------------------
+v1.43 20th February 2019
+----------------------------------------------------------------
+
+ISteamParties 
+* This API can be used to selectively advertise your multiplayer game session in a Steam chat room group. Tell Steam the number of player spots that are available for your party, and a join-game string, and it will show a beacon in the selected group and allow that many users to “follow” the beacon to your party. Adjust the number of open slots if other players join through alternate matchmaking methods.  
+
+ISteamController
+* This interface will be deprecated and replaced with ISteamInput. For ease in upgrading the SDK ISteamController currently has feature parity with ISteamInput, but future features may not be ported back. Please use ISteamInput for new projects.
+* Added GetActionOriginFromXboxOrigin, GetStringForXboxOrigin and GetGlyphForXboxOrigin to allow Xinput games to easily query glyphs for devices coming in through Steam Input’s Xinput emulation, ex: “A button”->”Cross button” on a PS4 controller. This is a simple translation of the button and does not take user remapping into account – the full action based API is required for that.
+* Added TranslateActionOrigin which allows Steam Input API games to which are using look up tables to translate action origins from an recognized device released after the game was last built into origins they recognize.
+* Added count and max_possible fields to current enums to make using lookup tables easier
+
+ISteamInput
+* This new interface replaces ISteamController to better reflect the fact this API supports not just the Steam Controller but every controller connected to Steam – including Xbox Controllers, Playstation Controllers and Nintendo Switch controllers. ISteamController currently has feature parity with the new features added in ISteamInput but new feature may not be ported back. Please use this interface instead of ISteamController for any new projects.
+* Migrating to ISteamInput from ISteamController should mostly be a search-replace operation but any action origin look up tables will need to be adjusted as some of the enum orders have changed.
+* Added GetActionOriginFromXboxOrigin, GetStringForXboxOrigin and GetGlyphForXboxOrigin to allow Xinput games to easily query glyphs for devices coming in through Steam Input’s Xinput emulation, ex: “A button”->”Cross button” on a PS4 controller. This is a simple translation of the button and does not take user remapping into account – the full action based API is required for that.
+* Added TranslateActionOrigin which allows Steam Input API games to which are using look up tables to translate action origins from an recognized device released after the game was last built into origins they recognize.
+* Added count and max_possible fields to current enums to make using lookup tables easier
+
+ISteamFriends
+* ActivateGameOverlayToWebPage – Added a new parameter to control how the created web browser window is displayed within the Steam Overlay. The default mode will create a new browser tab next to all other overlay windows that the user already has open. The new modal mode will create a new browser window and activate the Steam Overlay, showing only that window. When the browser window is closed, the Steam Overlay is automatically closed as well.
+
+ISteamInventory
+* GetItemsWithPrices and GetItemPrice - Added the ability to get the “base price” for a set of items, which you can use to markup in your own UI that items are “on sale” 
+
+ISteamUGC
+* SetAllowLegacyUpload - Call to force the use of Steam Cloud for back-end storage (instead of Steam Pipe), which is faster and more efficient for uploading and downloading small files (less than 100MB).
+* CreateQueryAllUGCRequest - Added ability to page through query results using a “cursor” instead of a page number.  This is more efficient and supports “deep paging” beyond page 1000.  The old version of CreateQueryAllUGCRequest() that takes a page parameter is deprecated and cannot query beyond page 1000.  Note that you will need to keep track of the “previous” cursor in order to go to a previous page.
+
+ISteamApps
+* GetLaunchCommandLine - Get command line if game was launched via Steam URL, e.g. steam://run/<appid>//<command line>/. If you get NewUrlLaunchParameters_t callback while running, call again to get new command line
+* BIsSubscribedFromFamilySharing - Check if subscribed app is temporarily borrowed via Steam Family Sharing
+
+Steam API
+* Refactored headers to minimize the number of headers that need to be included to use a single ISteam interface.
+* Renamed some macros with STEAM_ prefix to minimize conflicts in the global namespace
+
+
+
+----------------------------------------------------------------
+v1.42 3rd January 2018
+----------------------------------------------------------------
+
+ISteamInventory
+* Added ability to start a purchase process through the Steam Client via the StartPurchase call and a given set of item definition ids and quantities.  Users will be prompted in the Steam Client overlay to complete the purchase, including funding their Steam Wallet if necessary.  Returns a SteamInventoryStartPurchaseResult_t call result if the user authorizes the purchase.
+* Added ability to retrieve item definition prices via the RequestPrices call. Once the call result SteamInventoryRequestPricesResult_t is returned, GetNumItemsWithPrices, GetItemsWithPrices, and GetItemPrice can be called to retrieve the item definition prices in the user's local currency.
+* Added ability to modify whitelisted per item dynamic properties. The usage pattern is to call StartUpdateProperties, SetProperty or RemoveProperty, and finally SubmitUpdateProperties.  The SteamInventoryCallback_t will be fired with the appropriate result handle on success or failure.
+* Deprecated TradeItems
+
+ISteamController
+* Added Action Set Layers – Action Set Layers are optional sets of action bindings which can be overlaid upon an existing set of controls.  In contrast to Action Sets, layers draw their actions from the Action Set they exist within and do not wholesale replace what is already active when applied, but apply small modifications.  These can consist of setting changes as well as adding or removing bindings from the base action set.  More than one layer can be applied at a time and will be applied consecutively, so an example might be the Sniper Class layer which includes tweaks or bindings specific to snipers in addition to the Scoped-In layer which alters look sensitivity.
+* Added ActivateActionSetLayer – Activates the specified Layer.
+* Added DeactivateActionSetLayer – Deactivates the specified Layer.
+* Added DeactivateAllActionSetLayers – Deactivates all layers, resetting the mapping to the action base Action Set.
+* Added GetActiveActionSetLayers – Returns all currently active Action Set Layers.
+* Added GetInputTypeForHandle - Returns the input type for a particular handle, such as Steam Controller, PS4 Controller, Xbox One or 360.
+
+ISteamHTMLSurface
+* Added HTML_BrowserRestarted_t callback which is fired when the browser has restarted due to an internal failure
+
+ISteamFriends
+* Added IsClanPublic
+* Added IsClanOfficialGameGroup
+
+Steam API
+* Removed the ISteamUnifiedMessages interface.  It is no longer intended for public usage.
+
+
+----------------------------------------------------------------
+v1.41 13th July 2017
+----------------------------------------------------------------
+
+ISteamClient
+* Exposed ISteamParentalSettings interface. You can use this to determine if the user has parental settings turned on and for what high-level Steam features. 
+
+* ISteamHTMLSurface
+* Added SetDPIScalingFactor - Scale the output display space by this factor, this is useful when displaying content on high dpi devices.
+
+ISteamUGC
+* Added ability to mark a piece of UGC as requiring a set of DLC (AppID). These relationships are managed via new AddAppDependency, RemoveAppDependency, and GetAppDependencies calls.
+* Ported over ability to delete UGC from ISteamRemoteStorage and called it DeleteItem. Note that this does *not* prompt the user in any way.
+* Added m_nPublishedFileId to SubmitItemUpdateResult_t so that it is easier to keep track of what item was updated.
+
+
+----------------------------------------------------------------
+v1.40 25th April 2017
+----------------------------------------------------------------
+
+ISteamInventory
+* Update API documentation 
+* GetResultItemProperty - Retrieve dynamic properties for a given item returned in the result set.
+
+ISteamUtils
+* IsVRHeadsetStreamingEnabled - Returns true if the HMD content will be streamed via Steam In-Home Streaming
+* SetVRHeadsetStreamingEnabled - Set whether the HMD content will be streamed via Steam In-Home Streaming
+
+ISteamUser
+* GetAvailableVoice and GetVoice - Some parameters have become deprecated and now have default values.
+
+ISteamUGC 
+* SetReturnPlaytimeStats - Set the number of days of playtime stats to return for a piece of UGC.
+* AddDependency and RemoveDependency - Useful for parent-child relationship or dependency management
+
+ISteamVideo
+* Added GetOPFSettings and GetOPFStringForApp for retrieving Open Projection Format data used in Steam 360 Video playback. 
+* GetOPFSettings - Handle the GetOPFSettingsResult_t callback which is called when the OPF related data for the passed in AppID is ready for retrieval. 
+* GetOPFStringForApp - Using the AppID returned in GetOPFSettingsResult_t pass in an allocated string buffer to get the OPF data.
+
+SteamPipe GUI Tool
+* A simple GUI wrapper for Steamcmd/SteamPipe has been added to the SDK in the tools\ContentBuilder folder. More details can be found here: http://steamcommunity.com/groups/steamworks/discussions/0/412449508292646864
+
+
+----------------------------------------------------------------
+v1.39 6th January 2017
+----------------------------------------------------------------
+
+ISteamController
+
+The two new Origin helper functions in this interface allow you to query a description and a glyph for types of controllers and inputs that are in the current SDK header, but also any type of controller that might be supported by the Steam client in the future. To achieve this, pass origin values directly returned from Get*ActionOrigin() functions into GetStringForActionOrigin() and GetGlyphForActionOrigin() and display the results programmatically without checking against the range of the Origin enumerations.
+
+* TriggerVibration - Trigger a vibration event on supported controllers
+* SetLEDColor - Set the controller LED color on supported controllers
+* GetStringForActionOrigin - Returns a localized string (from Steam's language setting) for the specified origin
+* GetGlyphForActionOrigin - Get a local path to art for on-screen glyph for a particular origin
+* Updated Spacewar example to include example usage
+
+ISteamFriends
+* Removed k_EFriendFlagSuggested, since it was unused
+
+ISteamInventory
+* Updated and corrected documentation in the API
+* RequestEligiblePromoItemDefinitionsIDs - Request the list of "eligible" promo items that can be manually granted to the given user.  These are promo items of type "manual" that won't be granted automatically. An example usage of this is an item that becomes available every week.
+* GetEligiblePromoItemDefinitionIDs - After handling a SteamInventoryEligiblePromoItemDefIDs_t call result, use this function to pull out the list of item definition ids that the user can be manually granted via the AddPromoItems() call.
+
+
+----------------------------------------------------------------
+v1.38 14th October 2016
+----------------------------------------------------------------
+
+ISteamUGC
+* Added ability to track the playtime of Workshop items. Call StartPlaytimeTracking() and StopPlaytimeTracking() when appropriate. On application shutdown all playtime tracking will stop, but StopPlaytimeTrackingForAllItems() can also be used.
+* Added ability to query Workshop items by total playtime in a given period, total lifetime playtime, average playtime in a given period, lifetime average playtime, number of play sessions in a given period, and number of lifetime play sessions.
+* Added ability to retrieve item statistics for number of seconds played, number of play sessions, and number of comments.
+* Added SetReturnOnlyIDs() for queries.  This is useful for retrieving the list of items a user has subscribed to or favorited without having to get all the details for those items.
+* Modified GetQueryUGCStatistic() to take in a uint64 instead of a uint32 to support larger values
+
+ISteamUser
+* Added BIsPhoneIdentifying()
+* Added BIsPhoneRequiringVerification()
+
+ISteamScreenshots
+* Added IsScreenshotsHooked() if the application has hooked the screenshot
+* Added ability to add a VR screenshot that was saved to disk to the user's library
+
+ISteamRemoteStorage
+* Modified GetQuota() to take in uint64 from int32, since Steam Cloud can now support quotas above 2GB
+* Removed RemoteStorageConflictResolution_t callback
+
+ISteamApps
+* Added GetFileDetails() which will return FileDetailsResult_t through a call result. The FileDetailsResult_t struct contains information on the original file's size, SHA1, etc.
+
+ISteamFriends
+* Deprecated k_EFriendRelationshipSuggested relationship type that was originally used by Facebook linking feature
+
+----------------------------------------------------------------
+v1.37 23rd May 2016
+----------------------------------------------------------------
+
+Starting with this release, SDK forward-compatibility has been improved. All executables and libraries built using the official C++ headers from this SDK will continue to work even when paired with runtime DLLs from future SDKs. This will eventually allow for the mixing of dynamic libraries (such as third-party plug-ins) built with different versions of Steamworks.
+
+The VERSION_SAFE_STEAM_API_INTERFACES compile-time flag is no longer necessary for cross-version compatibility, and the SteamAPI_InitSafe and SteamGameServer_InitSafe functions have been removed. Applications which currently use these InitSafe functions should be changed to use the normal Init functions instead.
+
+
+ISteamRemoteStorage
+* Removed unsed UGCHandle_t m_hFile from RemoteStoragePublishedFileUpdated_t
+
+ISteamUGC
+* Added ability to add additional preview types to UGC such as standard images, YouTube videos, Sketchfab models, etc.
+
+ISteamUser
+* Added BIsPhoneVerified()
+* Added BIsTwoFactorEnabled()
+
+ISteamUtils
+* Added IsSteamInBigPictureMode()
+* Added StartVRDashboard(), which asks Steam to create and render the OpenVR Dashboard
+
+ISteamApps
+* Added RequestAllProofOfPurchaseKeys
+
+
+----------------------------------------------------------------
+v1.36 9th February 2016
+----------------------------------------------------------------
+
+ISteamController:
+* added new function TriggerRepeatedHapticPulse()
+
+
 Revision History:
+
+----------------------------------------------------------------
+v1.35 21st September 2015
+----------------------------------------------------------------
+
+ISteamController:
+ * The controller API has been redesigned to work with production Steam Controllers and take advantage of the configuration panel inside of Steam. The documentation on the partner site has a full overview of the new API.
+
+ISteamRemoteStorage:
+ * Added asynchronous file read and write methods. These methods will not block your calling thread for the duration of the disk IO. Additionally, the IO is performed in a worker thread in the Steam engine, so they will not impact other Steam API calls.
+  - FileWriteAsync: Similar in use to FileWrite, however it returns a SteamAPICall_t handle. Use the RemoteStorageFileWriteAsyncComplete_t structure with your asynchronous Steam API handler, and that will indicate the results of the write. The data buffer passed in to FileWriteAsync is immediately copied, so you do not have to ensure it is valid throughout the entire asynchronous process.
+  - FileReadAsync: This function queues an asynchronous read on the file specified, and also returns a SteamAPICall_t handle. The completion event uses the new RemoteStorageFileReadAsyncComplete_t structure. Upon successful completion, you can use the new FileReadAsyncComplete function to read the data -- passing in the original call handle, a pointer to a buffer for the data, and the amount to read (which generally should be equal to the amount read as specified by the callback structure, which generally will be equal to the amount requested). Additionally, the FileReadAsync function lets you specify an offset to read at, so it is no longer necessary to read the entire file in one call.
+
+
+----------------------------------------------------------------
+v1.34 28th July 2015
+----------------------------------------------------------------
+ISteamUGC:
+
+* Added ability to set and retrieve key-value tags on an item. There can be multiple values for each key.
+* Added ability to query all UGC that have matching key-value tags.
+* Added ability to specify a title and description on an item for a specific language (defaults to English).
+* Added ability to query for items and return the title and description in a preferred language.
+* Added ability to vote on an item and retrieve the current user's vote on a given item (duplicated from ISteamRemoteStorage).
+
+
+----------------------------------------------------------------
+v1.33 6th May 2015
+----------------------------------------------------------------
+
+UGC:
+* Added DownloadItem(), which will force download a piece of UGC (it will be cached based on usage). This can be used by stand-alone game servers.
+* Renamed GetItemUpdateInfo() => GetItemDownloadInfo() and added GetItemState() which can be used to determine whether an item is currently being downloaded, has already been downloaded, etc.
+* Added ability to set and retrieve developer metadata for an item
+* Added ability to modify a user's favorites list
+* Added ability to retrieve preview image & video URLs
+* Added ability to retrieve "children" for an item (e.g. for collections)
+* Added ability to retrieve stats, such as current number of subscribers, lifetime unique subscribers, etc.
+
+SteamVR
+* steamvr.h has been removed. You can use the OpenVR SDK to access those interfaces: https://github.com/ValveSoftware/openvr
+
+SteamVideo
+* Added ability to check if a user is currently broadcasting
+
+
+----------------------------------------------------------------
+v1.32 5th February 2015
+----------------------------------------------------------------
+
+General:
+* Added an auto-generated "flat" C-style API for common Steamworks features (steam_api_flat.h)
+* Added an auto-generated C# binding for common Steamworks features (steam_api_interop.cs)
+* Expanded the ISteamFriends interface to include steam levels and friends groups
+* Expanded the ISteamHTTP interface to include cookie handling, SSL certificate verification, and network timeouts
+* Fixed typos in ISteamHTMLSurface interface constants
+
+Inventory:
+* Added the initial version of ISteamInventory, a developer-preview release of our new Steam Inventory Service for managing and tracking a Steam-compatible inventory of in-game items. Please see the documentation for the Inventory Service on the partner website for more details.
+
+
+
+----------------------------------------------------------------
+v1.31 8th September 2014
+----------------------------------------------------------------
+
+UGC:
+* The Workshop item content API in ISteamUGC now supports legacy workshop items uploaded via the ISteamRemoteStorage interface. ISteamUGC::GetItemInstallInfo(). This will return whether the item was a legacy item or a new item. If it is a legacy item, then the pchFolder variable will be the full path to the file.
+
+HTML:
+* Added initial version of ISteamHTMLSurface API, which allows games to get textures for html pages and interact with them. There is also a sample implementation in the SteamworksExample.
+
+Virtual Reality:
+* Added VR_IsHmdPresent, which returns true if an HMD appears to be present but does not initialize the VR API. This is useful when enabling/disabling UI elements to offer VR mode to a user.
+* Added VR_GetStringForHmdError which turns an HmdError enum value into a string.
+
+SteamPipe
+* The example Steampipe batch file (run_build.bat) now uses run_app_build_http instead of run_app_build by default.
+
+ContentPrep.app
+* Updated wxPython requirements for this app (version 2.7 and 2.8 supported). App will prompt with updated URL to download compatible packages if necessary.
+
+
+
+----------------------------------------------------------------
+v1.30 10th July 2014
+----------------------------------------------------------------
+
+General:
+* Added a new Workshop item content API in ISteamUGC that is easy to use and allows multiple files per item without any size limits. It uses the same 
+  content system that handles regular content depots, resulting in faster and smaller downloads due to delta patching. Subscribed workshop items will
+  be placed in unique subfolders in the install folder, so the game doesn't need to fetch them using ISteamRemoteStorage anymore. The new API is not
+  backwards compatible with old items created with ISteamRemoteStorage. Added Workshop feature to steamworksexample using ISteamUGC.
+
+
+Steam VR:
+* VR_Init now requires that you call SteamAPI_Init first.
+
 
 ----------------------------------------------------------------
 v1.29 24th April 2014

@@ -23,16 +23,18 @@
 
 // Modify the following defines if you have to target a platform prior to the ones specified below.
 // Refer to MSDN for the latest info on corresponding values for different platforms.
-#ifndef WINVER				// Allow use of features specific to Windows 2k or later.
-#define WINVER 0x0500		// Change this to the appropriate value to target other versions of Windows.
+// Allow use of features specific to Windows 8.1 or later.
+// Change this to the appropriate value to target other versions of Windows.
+#ifndef WINVER
+#define WINVER 0x0602
 #endif
 
-#ifndef _WIN32_WINNT		// Allow use of features specific to Windows 2k or later.                   
-#define _WIN32_WINNT 0x0500	// Change this to the appropriate value to target other versions of Windows.
-#endif						
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602
+#endif
 
-#ifndef _WIN32_WINDOWS		// Allow use of features specific to Windows 98 or later.
-#define _WIN32_WINDOWS 0x0410 // Change this to the appropriate value to target Windows Me or later.
+#ifndef _WIN32_WINDOWS
+#define _WIN32_WINDOWS 0x0602
 #endif
 
 #ifndef _WIN32_IE			// Allow use of features specific to IE 6.0 or later.
@@ -67,7 +69,6 @@ typedef unsigned __int32 uint32;
 typedef __int64 int64;
 typedef unsigned __int64 uint64;
 
-#include "steam/steam_api.h"
 #include "steam/isteamuserstats.h"
 #include "steam/isteamremotestorage.h"
 #include "steam/isteammatchmaking.h"
@@ -84,15 +85,9 @@ typedef unsigned __int64 uint64;
 #include <sys/socket.h>
 #include <netinet/in.h>
 
-	#if defined(_PS3)
-
-	#include "stdafx_ps3.h"
-
-	#elif defined(OSX)
-	
+#if defined(OSX)	
 	#include <OpenGL/OpenGL.h>
-
-	#endif
+#endif
 
 #define ARRAYSIZE(A) ( sizeof(A)/sizeof(A[0]) )
 // Need to define some types on POSIX
@@ -187,7 +182,11 @@ extern void OutputDebugString( const char *pchMsg );
 extern int Alert( const char *lpCaption, const char *lpText );
 extern const char *GetUserSaveDataPath();
 
-#define Q_ARRAYSIZE(a) sizeof(a)/sizeof(a[0]) 
+#ifdef OSX
+extern uint64_t GetTickCount();
+#endif // OSX
+
+#define V_ARRAYSIZE(a) sizeof(a)/sizeof(a[0]) 
 
 #endif	// POSIX
 
@@ -220,11 +219,24 @@ template <size_t maxLenInChars> void sprintf_safe(OUT_Z_ARRAY char (&pDest)[maxL
 	va_end( params );
 }
 
+inline void strncpy_safe( char *pDest, char const *pSrc, size_t maxLen )
+{
+	size_t nCount = maxLen;
+	char *pstrDest = pDest;
+	const char *pstrSource = pSrc;
+
+	while ( 0 < nCount && 0 != ( *pstrDest++ = *pstrSource++ ) )
+		nCount--;
+
+	if ( maxLen > 0 )
+		pstrDest[-1] = 0;
+}
+
 #ifdef STEAM_CEG
 // Steam DRM header file
 #include "cegclient.h"
 #else
-#define Steamworks_InitCEGLibrary() (true)
+#define Steamworks_InitCEGLibrary() true
 #define Steamworks_TermCEGLibrary()
 #define Steamworks_TestSecret()
 #define Steamworks_SelfCheck()

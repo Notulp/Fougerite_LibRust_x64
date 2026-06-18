@@ -10,7 +10,9 @@
 #include <direct.h>
 #else
 #define MAX_PATH PATH_MAX
+#include <unistd.h>
 #define _getcwd getcwd
+#define _snprintf snprintf
 #endif
 
 #if defined(WIN32)
@@ -21,7 +23,7 @@
 	extern IGameEngine *CreateGameEngineOSX();
 #elif defined(SDL)
 	#include "GameEngine.h"
-	extern IGameEngine *CreateGameEngineSDL( bool bUseVR );
+	extern IGameEngine *CreateGameEngineSDL();
 #endif
 
 #include "SpaceWarClient.h"
@@ -33,6 +35,8 @@
 #ifdef _WIN32
 void MiniDumpFunction( unsigned int nExceptionCode, EXCEPTION_POINTERS *pException )
 {
+	MessageBox( nullptr, "Spacewar is crashing now!", "Unhandled Exception", MB_OK );
+
 	// You can build and set an arbitrary comment to embed in the minidump here,
 	// maybe you want to put what level the user was playing, how many players on the server,
 	// how much memory is free, etc...
@@ -70,7 +74,7 @@ extern "C" void __cdecl SteamAPIDebugTextHook( int nSeverity, const char *pchDeb
 	{
 		// place to set a breakpoint for catching API errors
 		int x = 3;
-		x = x;
+		(void)x;
 	}
 }
 
@@ -78,49 +82,48 @@ extern "C" void __cdecl SteamAPIDebugTextHook( int nSeverity, const char *pchDeb
 //-----------------------------------------------------------------------------
 // Purpose: Extracts some feature from the command line
 //-----------------------------------------------------------------------------
-void ParseCommandLine( const char *pchCmdLine, const char **ppchServerAddress, const char **ppchLobbyID, bool *pbUseVR )
+bool ParseCommandLine( const char *pchCmdLine, const char **ppchServerAddress, const char **ppchLobbyID )
 {
 	// Look for the +connect ipaddress:port parameter in the command line,
 	// Steam will pass this when a user has used the Steam Server browser to find
 	// a server for our game and is trying to join it. 
-	const char *pchConnectParam = "+connect";
+	const char *pchConnectParam = "+connect ";
 	const char *pchConnect = strstr( pchCmdLine, pchConnectParam );
 	*ppchServerAddress = NULL;
-	if ( pchConnect && strlen( pchCmdLine ) > (pchConnect - pchCmdLine) + strlen( pchConnectParam ) + 1 )
+	if ( pchConnect && strlen( pchCmdLine ) > (pchConnect - pchCmdLine) + strlen( pchConnectParam ) )
 	{
-		// Address should be right after the +connect, +1 on the end to skip the space
-		*ppchServerAddress = pchCmdLine + ( pchConnect - pchCmdLine ) + strlen( pchConnectParam ) + 1;
+		// Address should be right after the +connect
+		*ppchServerAddress = pchCmdLine + ( pchConnect - pchCmdLine ) + strlen( pchConnectParam );
 	}
 
 	// look for +connect_lobby lobbyid paramter on the command line
 	// Steam will pass this in if a user taken up an invite to a lobby
-	const char *pchConnectLobbyParam = "+connect_lobby";
-	const char *pchConnectLobby = strstr( pchCmdLine, pchConnectParam );
+	const char *pchConnectLobbyParam = "+connect_lobby ";
+	const char *pchConnectLobby = strstr( pchCmdLine, pchConnectLobbyParam );
 	*ppchLobbyID = NULL;
-	if ( pchConnectLobby && strlen( pchCmdLine ) > (pchConnectLobby - pchCmdLine) + strlen( pchConnectLobbyParam ) + 1 )
+	if ( pchConnectLobby && strlen( pchCmdLine ) > (pchConnectLobby - pchCmdLine) + strlen( pchConnectLobbyParam ) )
 	{
-		// Address should be right after the +connect, +1 on the end to skip the space
-		*ppchLobbyID = pchCmdLine + ( pchConnectLobby - pchCmdLine ) + strlen( pchConnectLobbyParam ) + 1;
+		// lobby ID should be right after the +connect_lobby
+		*ppchLobbyID = pchCmdLine + ( pchConnectLobby - pchCmdLine ) + strlen( pchConnectLobbyParam );
 	}
 
-	// look for -vr on command line. Switch to VR mode if it's thre
-	const char *pchVRParam = "-vr";
-	const char *pchVR = strstr( pchCmdLine, pchVRParam );
-	if ( pchVR )
-		*pbUseVR = true;
+	return *ppchServerAddress || *ppchLobbyID;
+
 }
 
 
 //-----------------------------------------------------------------------------
 // Purpose: Main loop code shared between all platforms
 //-----------------------------------------------------------------------------
-void RunGameLoop( IGameEngine *pGameEngine, const char *pchServerAddress, const char *pchLobbyID )
+void RunGameLoop( IGameEngine *pGameEngine, const char *pchServerAddress, const char *pchLobbyID, bool bShowTimer )
 {
 	// Make sure it initialized ok
 	if ( pGameEngine->BReadyForUse() )
 	{
 		// Initialize the game
 		CSpaceWarClient *pGameClient = new CSpaceWarClient( pGameEngine );
+
+		pGameClient->SetShowTimer( bShowTimer );
 
 		// Black background
 		pGameEngine->SetBackgroundColor( 0, 0, 0, 0 );
@@ -163,11 +166,8 @@ void RunGameLoop( IGameEngine *pGameEngine, const char *pchServerAddress, const 
 //-----------------------------------------------------------------------------
 // Purpose: Real main entry point for the program
 //-----------------------------------------------------------------------------
-#ifndef _PS3
-
 static int RealMain( const char *pchCmdLine, HINSTANCE hInstance, int nCmdShow )
-{
-	
+{	
 	if ( SteamAPI_RestartAppIfNecessary( k_uAppIdInvalid ) )
 	{
 		// if Steam is not running or the game wasn't started through Steam, SteamAPI_RestartAppIfNecessary starts the 
@@ -177,11 +177,10 @@ static int RealMain( const char *pchCmdLine, HINSTANCE hInstance, int nCmdShow )
 		// removed steam_appid.txt from the game depot.
 
 		return EXIT_FAILURE;
-	}
-	
+	}	
 
 	// Init Steam CEG
-	if ( !Steamworks_InitCEGLibrary() )
+	if ( ( !Steamworks_InitCEGLibrary() ) )
 	{
 		OutputDebugString( "Steamworks_InitCEGLibrary() failed\n" );
 		Alert( "Fatal Error", "Steam must be running to play this game (InitDrmLibrary() failed).\n" );
@@ -195,22 +194,19 @@ static int RealMain( const char *pchCmdLine, HINSTANCE hInstance, int nCmdShow )
 	// This will also load the in-game steam overlay dll into your process.  That dll is normally
 	// injected by steam when it launches games, but by calling this you cause it to always load,
 	// even when not launched via steam.
-	if ( !SteamAPI_Init() )
+	SteamErrMsg errMsg = { 0 };
+	if ( SteamAPI_InitEx( &errMsg ) != k_ESteamAPIInitResult_OK )
 	{
-		OutputDebugString( "SteamAPI_Init() failed\n" );
+		OutputDebugString( "SteamAPI_Init() failed: " );
+		OutputDebugString( errMsg );
+		OutputDebugString( "\n" );
+
 		Alert( "Fatal Error", "Steam must be running to play this game (SteamAPI_Init() failed).\n" );
 		return EXIT_FAILURE;
 	}
 
 	// set our debug handler
 	SteamClient()->SetWarningMessageHook( &SteamAPIDebugTextHook );
-
-	// Tell Steam where it's overlay should show notification dialogs, this can be top right, top left,
-	// bottom right, bottom left. The default position is the bottom left if you don't call this.  
-	// Generally you should use the default and not call this as users will be most comfortable with 
-	// the default position.  The API is provided in case the bottom right creates a serious conflict 
-	// with important UI in your game.
-	SteamUtils()->SetOverlayNotificationPosition( k_EPositionTopRight );
 
 	// Ensure that the user has logged into Steam. This will always return true if the game is launched
 	// from Steam, but if Steam is at the login prompt when you run your game from the debugger, it
@@ -222,57 +218,66 @@ static int RealMain( const char *pchCmdLine, HINSTANCE hInstance, int nCmdShow )
 		return EXIT_FAILURE;
 	}
 
-	// We are going to use the controller interface, initialize it, which is a seperate step as it 
-	// create a new thread in the game proc and we don't want to force that on games that don't
-	// have native Steam controller implementations
-
-	char rgchCWD[1024];
-	_getcwd( rgchCWD, sizeof( rgchCWD ) );
-
-	char rgchFullPath[1024];
-#if defined(_WIN32)
-	_snprintf( rgchFullPath, sizeof( rgchFullPath ), "%s\\%s", rgchCWD, "controller.vdf" );
-#elif defined(OSX)
-    // hack for now, because we do not have utility functions available for finding the resource path
-    // alternatively we could disable the SteamController init on OS X
-    _snprintf( rgchFullPath, sizeof( rgchFullPath ), "%s/steamworksexample.app/Contents/Resources/%s", rgchCWD, "controller.vdf" );
-#else
-	_snprintf( rgchFullPath, sizeof( rgchFullPath ), "%s/%s", rgchCWD, "controller.vdf" );
-#endif
-	if( !SteamController()->Init( rgchFullPath ) )
+	const char *pchServerAddress, *pchLobbyID;
+	if ( !ParseCommandLine( pchCmdLine, &pchServerAddress, &pchLobbyID ) )
 	{
-		OutputDebugString( "SteamController()->Init() failed\n" );
-		Alert( "Fatal Error", "Steam Controller Init failed. Is controller.vdf in the current working directory?\n" );
-		return EXIT_FAILURE;
+		// no connect string on process command line. If app was launched via a Steam URL, the extra command line parameters in that URL
+		// get be retrieved with GetLaunchCommandLine. This way an attacker can't put malicious parameters in the process command line
+		// which might allow much more functionality then indented.
+		
+		char szCommandLine[1024] = {};
+
+		if ( SteamApps()->GetLaunchCommandLine( szCommandLine, sizeof( szCommandLine ) ) > 0 )
+		{
+			ParseCommandLine( szCommandLine, &pchServerAddress, &pchLobbyID );
+		}
 	}
 
-	bool bUseVR = SteamUtils()->IsSteamRunningInVR();
-	const char *pchServerAddress, *pchLobbyID;
-	ParseCommandLine( pchCmdLine, &pchServerAddress, &pchLobbyID, &bUseVR );
+	bool bShowTimer = !!strstr( pchCmdLine, "-timer" );
 
 	// do a DRM self check
 	Steamworks_SelfCheck();
 
-	// init VR before we make the window
-
 	// Construct a new instance of the game engine 
 	// bugbug jmccaskey - make screen resolution dynamic, maybe take it on command line?
-	IGameEngine *pGameEngine = 
+	IGameEngine *pGameEngine =
 #if defined(_WIN32)
-        new CGameEngineWin32( hInstance, nCmdShow, 1024, 768, bUseVR );
+		new CGameEngineWin32( hInstance, nCmdShow, 1024, 768 );
 #elif defined(OSX)
-        CreateGameEngineOSX();
+		CreateGameEngineOSX();
 #elif defined(SDL)
-	CreateGameEngineSDL( bUseVR );
+		CreateGameEngineSDL( );
 #else
 #error	Need CreateGameEngine()
 #endif
-    
+
+	if ( !SteamInput()->Init( false ) )
+	{
+		OutputDebugString( "SteamInput()->Init failed.\n" );
+		Alert( "Fatal Error", "SteamInput()->Init failed.\n" );
+		return EXIT_FAILURE;
+	}
+	char rgchCWD[1024];
+	if ( !_getcwd( rgchCWD, sizeof( rgchCWD ) ) )
+	{
+		strcpy( rgchCWD, "." );
+	}
+
+	char rgchFullPath[1024];
+#if defined(OSX)
+	// hack for now, because we do not have utility functions available for finding the resource path
+	// alternatively we could disable the SteamController init on OS X
+	_snprintf( rgchFullPath, sizeof( rgchFullPath ), "%s/steamworksexample.app/Contents/Resources/%s", rgchCWD, "steam_input_manifest.vdf" );
+#else
+	_snprintf( rgchFullPath, sizeof( rgchFullPath ), "%s\\%s", rgchCWD, "steam_input_manifest.vdf" );
+#endif
+
+	SteamInput()->SetInputActionManifestFilePath( rgchFullPath );
+
 	// This call will block and run until the game exits
-	RunGameLoop( pGameEngine, pchServerAddress, pchLobbyID );
+	RunGameLoop( pGameEngine, pchServerAddress, pchLobbyID, bShowTimer );
 
 	// Shutdown the SteamAPI
-	SteamController()->Shutdown();
 	SteamAPI_Shutdown();
 
 	// Shutdown Steam CEG
@@ -281,7 +286,7 @@ static int RealMain( const char *pchCmdLine, HINSTANCE hInstance, int nCmdShow )
 	// exit
 	return EXIT_SUCCESS;	
 }
-#endif
+
 
 //-----------------------------------------------------------------------------
 // Purpose: Main entry point for the program -- win32
@@ -323,7 +328,7 @@ int main(int argc, const char **argv)
 {
     char szCmdLine[1024];
     char *pszStart = szCmdLine;
-    char * const pszEnd = szCmdLine + Q_ARRAYSIZE(szCmdLine);
+    char * const pszEnd = szCmdLine + V_ARRAYSIZE(szCmdLine);
 
     *szCmdLine = '\0';
     
@@ -342,7 +347,7 @@ int main(int argc, const char **argv)
             *pszStart++ = ' ';
     }
     
-    szCmdLine[Q_ARRAYSIZE(szCmdLine) - 1] = '\0';
+    szCmdLine[V_ARRAYSIZE(szCmdLine) - 1] = '\0';
     
     return RealMain( szCmdLine, 0, 0 );
 }
@@ -352,7 +357,7 @@ int main(int argc, const char **argv)
 {
     char szCmdLine[1024];
     char *pszStart = szCmdLine;
-    char * const pszEnd = szCmdLine + Q_ARRAYSIZE(szCmdLine);
+    char * const pszEnd = szCmdLine + V_ARRAYSIZE(szCmdLine);
     *szCmdLine = '\0';
     for ( int i = 1; i < argc; i++ )
     {
@@ -366,7 +371,7 @@ int main(int argc, const char **argv)
         if ( i < argc-1 )
             *pszStart++ = ' ';
     }
-    szCmdLine[Q_ARRAYSIZE(szCmdLine) - 1] = '\0';
+    szCmdLine[V_ARRAYSIZE(szCmdLine) - 1] = '\0';
     return RealMain( szCmdLine, 0, 0 );
 }
 #endif

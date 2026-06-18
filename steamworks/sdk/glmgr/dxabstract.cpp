@@ -18,6 +18,14 @@
 #endif
 
 #include <Carbon/Carbon.h>
+
+// Debugger - 10.8
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
+#endif
+
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wunused-variable"
 #endif
 
 #ifdef USE_ACTUAL_DX
@@ -992,7 +1000,7 @@ HRESULT IDirect3D9::GetDeviceCaps(UINT Adapter,D3DDEVTYPE DeviceType,D3DCAPS9* p
 	// just leave glmRendererInfo filled out for subsequent code to look at as needed.
 	
 	// fill in the pCaps record for adapter... we zero most of it and just fill in the fields that we think the caller wants.
-	Q_memset( pCaps, 0, sizeof(*pCaps) );
+	V_memset( pCaps, 0, sizeof(*pCaps) );
 	
 
     /* Device Info */
@@ -1113,7 +1121,7 @@ HRESULT IDirect3D9::GetAdapterIdentifier( UINT Adapter, DWORD Flags, D3DADAPTER_
 
 	Assert( Flags == D3DENUM_WHQL_LEVEL );	// we're not handling any other queries than this yet
 	
-	Q_memset( pIdentifier, 0, sizeof(*pIdentifier) );
+	V_memset( pIdentifier, 0, sizeof(*pIdentifier) );
 
 	GLMDisplayDB *db = g_engine->GetDisplayDB();
 	int glmRendererIndex = -1;
@@ -1144,8 +1152,8 @@ HRESULT IDirect3D9::GetAdapterIdentifier( UINT Adapter, DWORD Flags, D3DADAPTER_
 
 	#if 0
 		// this came from the shaderapigl effort	
-		Q_strncpy( pIdentifier->Driver, "Fake-Video-Card", MAX_DEVICE_IDENTIFIER_STRING );
-		Q_strncpy( pIdentifier->Description, "Fake-Video-Card", MAX_DEVICE_IDENTIFIER_STRING );
+		V_strncpy( pIdentifier->Driver, "Fake-Video-Card", MAX_DEVICE_IDENTIFIER_STRING );
+		V_strncpy( pIdentifier->Description, "Fake-Video-Card", MAX_DEVICE_IDENTIFIER_STRING );
 		pIdentifier->VendorId				= 4318;
 		pIdentifier->DeviceId				= 401;
 		pIdentifier->SubSysId				= 3358668866;
@@ -1707,6 +1715,9 @@ HRESULT IDirect3DQuery9::Issue(DWORD dwIssueFlags)
 				// http://msdn.microsoft.com/en-us/library/ee422167(VS.85).aspx
 				m_query->Start();	// drop "set fence" into stream
 			break;
+
+			default:
+			break;
 		}
 	}
 	return S_OK;
@@ -1790,6 +1801,9 @@ HRESULT IDirect3DQuery9::GetData(void* pData,DWORD dwSize,DWORD dwGetDataFlags)
 					result = S_FALSE;
 				}
 			}
+			break;
+
+			default:
 			break;
 		}
 	}
@@ -2577,7 +2591,7 @@ HRESULT IDirect3DDevice9::GetRenderTarget(DWORD RenderTargetIndex,IDirect3DSurfa
 	if ( !m_rtSurfaces[ RenderTargetIndex ] )
 		return D3DERR_NOTFOUND;
 	
-	if ( ( RenderTargetIndex < 0 ) || ( RenderTargetIndex > 4 ) || !ppRenderTarget )
+	if ( ( RenderTargetIndex > 4 ) || !ppRenderTarget )
 		return D3DERR_INVALIDCALL;
 
 	// safe because of early exit on NULL above
@@ -3076,11 +3090,11 @@ HRESULT IDirect3DDevice9::CreatePixelShader(CONST DWORD* pFunction,IDirect3DPixe
 			//------ find the frag program metadata and extract it.. note this takes place even for passthrough shaders, so they need to supply the needed string too
 
 			// find the highwater mark
-			char *highWaterPrefix = "//HIGHWATER-";		// try to arrange this so it can work with pure GLSL if needed
-			char *highWaterStr = strstr( (char *)transbuf.Base(), highWaterPrefix );
+			const char *highWaterPrefix = "//HIGHWATER-";		// try to arrange this so it can work with pure GLSL if needed
+			const char *highWaterStr = strstr( (char *)transbuf.Base(), highWaterPrefix );
 			if (highWaterStr)
 			{
-				char *highWaterActualData = highWaterStr + strlen( highWaterPrefix );
+				const char *highWaterActualData = highWaterStr + strlen( highWaterPrefix );
 				
 				int value = -1;
 				sscanf( highWaterActualData, "%d", &value );
@@ -3094,7 +3108,7 @@ HRESULT IDirect3DDevice9::CreatePixelShader(CONST DWORD* pFunction,IDirect3DPixe
 			}
 			
 			// find the sampler map
-			char *samplerMaskPrefix = "//SAMPLERMASK-";		// try to arrange this so it can work with pure GLSL if needed
+			const char *samplerMaskPrefix = "//SAMPLERMASK-";		// try to arrange this so it can work with pure GLSL if needed
 			
 			char *samplerMaskStr = strstr( (char *)transbuf.Base(), samplerMaskPrefix );
 			if (samplerMaskStr)
@@ -3295,11 +3309,11 @@ HRESULT IDirect3DDevice9::CreateVertexShader(CONST DWORD* pFunction, IDirect3DVe
 
 			// find the highwater mark.. note this takes place even for passthrough shaders, so they need to supply the needed string too
 
-			char *highWaterPrefix = "//HIGHWATER-";		// try to arrange this so it can work with pure GLSL if needed
-			char *highWaterStr = strstr( (char *)transbuf.Base(), highWaterPrefix );
+			const char *highWaterPrefix = "//HIGHWATER-";		// try to arrange this so it can work with pure GLSL if needed
+			const char *highWaterStr = strstr( (char *)transbuf.Base(), highWaterPrefix );
 			if (highWaterStr)
 			{
-				char *highWaterActualData = highWaterStr + strlen( highWaterPrefix );
+				const char *highWaterActualData = highWaterStr + strlen( highWaterPrefix );
 				
 				int value = -1;
 				sscanf( highWaterActualData, "%d", &value );
@@ -3313,17 +3327,17 @@ HRESULT IDirect3DDevice9::CreateVertexShader(CONST DWORD* pFunction, IDirect3DVe
 			}
 			
 			// find the attrib map..
-			char *attribMapPrefix = "//ATTRIBMAP-";		// try to arrange this so it can work with pure GLSL if needed
-			char *textbase = (char *)transbuf.Base();
+			const char *attribMapPrefix = "//ATTRIBMAP-";		// try to arrange this so it can work with pure GLSL if needed
+			const char *textbase = (char *)transbuf.Base();
 			
-			char *attribMapStr = strstr( textbase, attribMapPrefix );
+			const char *attribMapStr = strstr( textbase, attribMapPrefix );
 			if (attribMapStr)
 			{
-				char *attribMapActualData = attribMapStr + strlen( attribMapPrefix );
+				const char *attribMapActualData = attribMapStr + strlen( attribMapPrefix );
 				for( int i=0; i<16; i++)
 				{
 					int value = -1;
-					char *dataItem = attribMapActualData + (i*3);
+					const char *dataItem = attribMapActualData + (i*3);
 					sscanf( dataItem, "%02x", &value );
 					if (value >=0)
 					{
@@ -3459,7 +3473,8 @@ HRESULT IDirect3DDevice9::CreateVertexDeclaration(CONST D3DVERTEXELEMENT9* pVert
 	//	each one is a cursor that gets bumped by decls.
 	uint	streamOffsets[ D3D_MAX_STREAMS ];
 	uint	streamCount = 0;
-	
+	(void)streamCount;
+
 	uint	attribMap[16];
 	uint	attribMapIndex = 0;
 	memset( attribMap, 0xFF, sizeof( attribMap ) );
@@ -4657,7 +4672,7 @@ HRESULT IDirect3DDevice9::FlushStates( uint mask )
 				temp1 = temp2 = gl.m_ClipPlaneEquation[x];
 			}
 
-			if (1)	//GLMKnob("caps-key",NULL)==0.0)
+			if ( ( 1 ) )	//GLMKnob("caps-key",NULL)==0.0)
 			{
 				m_ctx->WriteClipPlaneEquation( &temp1, x );		// no caps lock = Antonio or classic
 				
@@ -4806,14 +4821,14 @@ HRESULT IDirect3DDevice9::FlushSamplers( uint mask )
 	uint samplerHitMask = gl.m_samplerDirtyMask & mask;
 	for( int index = 0; (index < 16) && (samplerHitMask !=0); index++)
 	{
-		uint mask = 1<<index;
-		
+		uint bitMask = 1<<index;
+
 		// only push a sampler to GLM if the sampler is dirty *and* there is a live texture on that TMU
 		// else the values will sit quietly in the d3d sampler side until conditions permit pushing them
-		if ( (samplerHitMask & mask) && (m_textures[index] != NULL) )
+		if ( (samplerHitMask & bitMask) && (m_textures[index] != NULL) )
 		{
 			// clear that dirty bit before you forget...
-			gl.m_samplerDirtyMask &= (~mask);
+			gl.m_samplerDirtyMask &= (~bitMask);
 			
 			// translate from D3D sampler desc
 			D3DSamplerDesc			*dxsamp = &m_samplers[ index ];
@@ -4933,7 +4948,7 @@ HRESULT IDirect3DDevice9::FlushSamplers( uint mask )
 					
 					if (srgbCapableTex && !renderableTex)
 					{
-						char *texname = m_textures[index]->m_tex->m_debugLabel;
+						const char *texname = m_textures[index]->m_tex->m_debugLabel;
 						if (!texname) texname = "-";
 						
 						m_textures[index]->m_srgbFlipCount++;
@@ -4961,8 +4976,7 @@ HRESULT IDirect3DDevice9::FlushSamplers( uint mask )
 						
 						if ( print_it )
 						{
-							char	*formatStr;
-							formatStr = "srgb change (samp=%d): tex '%-30s' %08x %s (srgb=%d, %d times)";
+							const char	*formatStr = "srgb change (samp=%d): tex '%-30s' %08x %s (srgb=%d, %d times)";
 							
 							if (strlen(texname) >= 30)
 							{
@@ -5293,6 +5307,9 @@ HRESULT IDirect3DDevice9::DrawPrimitive(D3DPRIMITIVETYPE PrimitiveType,UINT Star
 		case D3DPT_TRIANGLESTRIP:
 			m_ctx->DrawArrays( (GLenum)GL_TRIANGLE_STRIP, StartVertex, (GLsizei)PrimitiveCount+2 );
 		break;
+
+		default:
+		break;
 	}
 	
 	return S_OK;
@@ -5351,6 +5368,9 @@ HRESULT IDirect3DDevice9::DrawIndexedPrimitive( D3DPRIMITIVETYPE Type,INT BaseVe
 		case D3DPT_TRIANGLESTRIP:
 			// enabled... Debugger();
 			m_ctx->DrawRangeElements(GL_TRIANGLE_STRIP, (GLuint)MinVertexIndex, (GLuint)(MinVertexIndex + NumVertices), (GLsizei)(2+primCount), (GLenum)GL_UNSIGNED_SHORT, (const GLvoid *)(startIndex * sizeof(short)) );
+		break;
+
+		default:
 		break;
 	}
 	
@@ -5461,7 +5481,7 @@ HRESULT IDirect3DDevice9::SetScissorRect(CONST RECT* pRect)
 {
 	int nSurfaceHeight = m_drawableFBO->m_attach[ kAttColor0 ].m_tex->m_layout->m_key.m_ySize;
 	
-	GLScissorBox_t newScissorBox = { pRect->left, pRect->top, pRect->right - pRect->left, pRect->bottom - pRect->top };
+	GLScissorBox_t newScissorBox = { (GLint)pRect->left, (GLint)pRect->top, (GLint)(pRect->right - pRect->left), (GLint)(pRect->bottom - pRect->top) };
 	gl.m_ScissorBox	= newScissorBox;
 	gl.m_stateDirtyMask |= (1<<kGLScissorBox);
 	return S_OK;
@@ -5530,7 +5550,8 @@ void IDirect3DDevice9::SetGammaRamp(UINT iSwapChain,DWORD Flags,CONST D3DGAMMARA
 	// just slam it directly for the time being
 	// this code is OS X specific
 
-    CGDisplayErr cgErr;
+	CGDisplayErr cgErr;
+	(void)cgErr;
 
 	CGGammaValue	redt[256];
 	CGGammaValue	grnt[256];

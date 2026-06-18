@@ -90,7 +90,7 @@ public:
 	static void RemoveInstanceFromHWNDMap( HWND hWnd );
 
 	// Constructor
-	CGameEngineWin32( HINSTANCE hInstance, int nShowCommand, int32 nWindowWidth, int32 nWindowHeight, bool bUseVR );
+	CGameEngineWin32( HINSTANCE hInstance, int nShowCommand, int32 nWindowWidth, int32 nWindowHeight );
 
 	// Destructor
 	~CGameEngineWin32() { Shutdown(); }
@@ -127,7 +127,10 @@ public:
 	HGAMEFONT HCreateFont( int nHeight, int nFontWeight, bool bItalic, const char * pchFont );
 
 	// Create a new texture returning our internal handle value for it (0 means failure)
-	HGAMETEXTURE HCreateTexture( byte *pRGBAData, uint32 uWidth, uint32 uHeight );
+	HGAMETEXTURE HCreateTexture( byte *pRGBAData, uint32 uWidth, uint32 uHeight, ETEXTUREFORMAT eTextureFormat = eTextureFormat_RGBA );
+
+	// update an existing texture
+	bool UpdateTexture( HGAMETEXTURE texture, byte *pRGBAData, uint32 uWidth, uint32 uHeight, ETEXTUREFORMAT eTextureFormat );
 
 	// Draw a line, the engine itself will manage batching these (although you can explicitly flush if you need to)
 	bool BDrawLine( float xPos0, float yPos0, DWORD dwColor0, float xPos1, float yPos1, DWORD dwColor1 );
@@ -142,10 +145,14 @@ public:
 	bool BFlushPointBuffer();
 
 	// Draw a filled quad
-	bool BDrawFilledQuad( float xPos0, float yPos0, float xPos1, float yPos1, DWORD dwColor );
+	bool BDrawFilledRect( float xPos0, float yPos0, float xPos1, float yPos1, DWORD dwColor );
 
 	// Draw a textured rectangle 
-	bool BDrawTexturedQuad( float xPos0, float yPos0, float xPos1, float yPos1, 
+	bool BDrawTexturedRect( float xPos0, float yPos0, float xPos1, float yPos1, 
+		float u0, float v0, float u1, float v1, DWORD dwColor, HGAMETEXTURE hTexture );
+
+	// Draw a textured arbitrary quad
+	bool BDrawTexturedQuad( float xPos0, float yPos0, float xPos1, float yPos1, float xPos2, float yPos2, float xPos3, float yPos3,
 		float u0, float v0, float u1, float v1, DWORD dwColor, HGAMETEXTURE hTexture );
 
 	// Flush any still cached quad buffers
@@ -175,6 +182,50 @@ public:
 	// Get the first (in some arbitrary order) key down, if any
 	bool BGetFirstKeyDown( DWORD *pdwVK );
 
+	// Return true if there is an active Steam Controller
+	bool BIsSteamInputDeviceActive( );
+
+	// Find an active Steam controller
+	void FindActiveSteamInputDevice( );
+
+	// Get the current state of a controller action
+	bool BIsControllerActionActive( ECONTROLLERDIGITALACTION dwAction );
+
+	// Get the current state of a controller action
+	void GetControllerAnalogAction( ECONTROLLERANALOGACTION dwAction, float *x, float *y );
+
+	// Set the current Steam Controller Action set
+	void SetSteamControllerActionSet( ECONTROLLERACTIONSET dwActionSet );
+
+	// Set an Action Set Layer for Steam Input
+	virtual void ActivateSteamControllerActionSetLayer( ECONTROLLERACTIONSET dwActionSet );
+	virtual void DeactivateSteamControllerActionSetLayer( ECONTROLLERACTIONSET dwActionSet );
+
+	// Returns whether a given action set layer is active
+	virtual bool BIsActionSetLayerActive( ECONTROLLERACTIONSET dwActionSetLayer );
+	
+	// These calls return a string describing which controller button the action is currently bound to
+	const char *GetTextStringForControllerOriginDigital( ECONTROLLERACTIONSET dwActionSet, ECONTROLLERDIGITALACTION dwDigitalAction );
+	const char *GetTextStringForControllerOriginAnalog( ECONTROLLERACTIONSET dwActionSet, ECONTROLLERANALOGACTION dwDigitalAction );
+
+	// Set the controller LED Color, if available
+	void SetControllerColor( uint8 nColorR, uint8 nColorG, uint8 nColorB, unsigned int nFlags );
+
+	// Set the trigger effect on DualSense controllers
+	void SetTriggerEffect( bool bEnabled );
+
+	// Trigger a vibration on the controller, if available
+	void TriggerControllerVibration( unsigned short nLeftSpeed, unsigned short nRightSpeed );
+
+	// Trigger haptics on the specified pad of the controller, if available
+	void TriggerControllerHaptics( ESteamControllerPad ePad, unsigned short usOnMicroSec, unsigned short usOffMicroSec, unsigned short usRepeat );
+
+	// Initialize the Steam Controller interfaces
+	void InitSteamInput( );
+
+	// Called each frame to update the Steam Controller interface
+	void PollSteamInput();
+
 	// Get current tick count for the game engine
 	uint64 GetGameTickCount() { return m_ulGameTickCount; }
 
@@ -203,9 +254,6 @@ public:
 	void RecordKeyUp( DWORD dwVK );
 
 private:
-	// Create a new texture returning our internal handle value for it (0 means failure)
-	HGAMETEXTURE HCreateTextureInternal( byte *pRGBAData, uint32 uWidth, uint32 uHeight, D3DFORMAT eFormat );
-
 
 	// Creates the hwnd for the game
 	bool BCreateGameWindow( int nShowCommand );
@@ -243,18 +291,12 @@ private:
 	// Handle reseting the d3d device (ie, acquire resources again)
 	bool BHandleResetDevice();
 
-	// Loads the VR distortion shader off disk
-	bool BInitializeVRShader();
-
 private:
 	// Tracks whether the engine is ready for use
 	bool m_bEngineReadyForUse;
 
 	// Tracks if we are shutting down
 	bool m_bShuttingDown;
-
-	// if this is not NULL we are in VR mode
-	vr::IHmd *m_pVRHmd;
 
 	// Color we clear the background of the window to each frame
 	DWORD m_dwBackgroundColor;
@@ -309,15 +351,10 @@ private:
 		uint32 m_uHeight;
 		LPDIRECT3DTEXTURE9 m_pTexture;
 		LPDIRECT3DSURFACE9 m_pDepthSurface; // render targets only
-		D3DFORMAT m_eFormat;
+		D3DFORMAT m_eFormat; // format for the texture on the card itself
+		ETEXTUREFORMAT m_eTextureFormat; // format of the data you provide
 	};
 	std::map<HGAMETEXTURE, TextureData_t> m_MapTextures;
-
-	// the render target we draw the 2D game into for VR
-	HGAMETEXTURE m_hVR2DRenderTarget;
-
-	// the render target we draw the 3D scene into for VR
-	HGAMETEXTURE m_hVRSceneRenderTarget;
 
 	// Vertex buffer for textured quads
 	HGAMEVERTBUF m_hQuadBuffer;
@@ -410,11 +447,22 @@ private:
 	std::map<HGAMEVOICECHANNEL, CVoiceContext* > m_MapVoiceChannel;
 	uint32 m_unVoiceChannelCount;
 
-	// Pixel shader for VR distortion correction
-	IDirect3DPixelShader9* m_pVRDistortionPixelShader;
+	// An array of handles to Steam Controller events that player can bind to controls
+	InputDigitalActionHandle_t m_ControllerDigitalActionHandles[eControllerDigitalAction_NumActions];
 
-	// the distortion map used by the VR distortion pixel shader (one per eye)
-	HGAMETEXTURE m_hVRDistortionMap[2];
+	// An array of handles to Steam Controller events that player can bind to controls
+	InputAnalogActionHandle_t m_ControllerAnalogActionHandles[eControllerAnalogAction_NumActions];
+
+	// An array of handles to different Steam Controller action set configurations
+	InputActionSetHandle_t m_ControllerActionSetHandles[eControllerActionSet_NumSets];
+
+	// A handle to the currently active Steam Controller. 
+	InputHandle_t m_ActiveControllerHandle;
+
+	// Origins for all the Steam Input actions. The 'origin' is where the action is currently bound to,
+	// ie 'jump' is currently bound to the Steam Controller 'A' button.
+	EInputActionOrigin m_ControllerDigitalActionOrigins[eControllerDigitalAction_NumActions];
+	EInputActionOrigin m_ControllerAnalogActionOrigins[eControllerDigitalAction_NumActions];
 };
 
 #endif // GAMEENGINEWIN32_H

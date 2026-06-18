@@ -159,7 +159,7 @@ private:
 #define V_strstr strstr
 #define __cdecl
 
-#define Q_memset(dst,count,val)	memset(dst,count,val)
+#define V_memset(dst,count,val)	memset(dst,count,val)
 
 int			V_stricmp(const char *s1, const char *s2 );
 char const* V_stristr( char const* pStr, char const* pSearch );
@@ -310,13 +310,17 @@ inline void GLMDebugger( void )
 {
 	if (GLMDebugChannelMask() & (1<<eDebugger))
 	{
+#if defined( OSX ) && defined( __aarch64__ )
+		__builtin_debugtrap();
+#else
 		asm ( "int $3" );
+#endif
 	}
 	
 	if (GLMDebugChannelMask() & (1<<eGLProfiler))
 	{
 		// we call an obscure GL function which we know has been breakpointed in the OGLP function list
-		static short nada[] = {0xFFFF,0xFFFF,0xFFFF,0xFFFF};
+        static short nada[] = { -1, -1, -1, -1 };
 		glColor4sv( nada );
 	}
 }
@@ -490,7 +494,7 @@ struct GLMTextSection
 class CGLMTextSectioner
 {
 public:
-					CGLMTextSectioner( char *text, int textSize, char **markers );		// constructor finds all the sections
+					CGLMTextSectioner( const char *text, int textSize, const char **markers );		// constructor finds all the sections
 					~CGLMTextSectioner( );
 					
 	int				Count( void );			// how many sections found

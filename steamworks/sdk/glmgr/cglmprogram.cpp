@@ -8,6 +8,15 @@
 #include "cglmprogram.h"
 #include "dxabstract.h"
 
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wunused-variable"
+#endif
+
+#ifdef OSX
+// Debugger - 10.8
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 //===============================================================================
 
 #if 0
@@ -126,7 +135,7 @@ enum EShaderSection
 
 };
 
-char *g_shaderSectionMarkers[] =	// match ordering of enum
+const char *g_shaderSectionMarkers[] =	// match ordering of enum
 {
 	"!!ARBvp",	"-!!ARBvp",			// enabled and disabled markers.  so you can have multiple flavors in a blob and activate the one you want.
 	"!!ARBfp",	"-!!ARBfp",
@@ -247,7 +256,10 @@ void	CGLMProgram::SetProgramText( char *text )
 					
 					default: Assert(!"Mismatched section marker seen in SetProgramText (VP)"); break;
 				}
-			break;			
+			break;
+
+			default:
+			break;
 		}
 	}
 }
@@ -402,6 +414,9 @@ bool	CGLMProgram::Compile( EGLMProgramLang lang )
 			result = glslDesc->m_valid;
 		}
 		break;
+
+		default:
+		break;
 	}
 	return result;
 }
@@ -510,8 +525,8 @@ struct GLMShaderLimitDesc
 {
 	GLenum	m_valueEnum;
 	GLenum	m_limitEnum;
-	char	*m_debugName;
-	char	m_flags;
+	const char	*m_debugName;
+	const char	m_flags;
 	// m_flags - 0x01 for VP, 0x02 for FP, or set both if applicable to both
 };
 
@@ -552,7 +567,7 @@ GLMShaderLimitDesc	g_glmShaderLimitDescs[] =
 
 bool CGLMProgram::CheckValidity( EGLMProgramLang lang )
 {
-	static char *targnames[] = { "vertex", "fragment" };
+	static const char *targnames[] = { "vertex", "fragment" };
 
 	switch(lang)
 	{
@@ -667,6 +682,9 @@ bool CGLMProgram::CheckValidity( EGLMProgramLang lang )
 
 			return glslDesc->m_valid;
 		}
+		break;
+
+		default:
 		break;
 	}
 	
@@ -1267,7 +1285,7 @@ void	CGLMShaderPairCache::QueryShaderPair( int index, GLMShaderPairInfo *infoOut
 	if ( (index<0) || ( index >= (m_rows*m_ways) ) )
 	{
 		// no such location
-		memset( infoOut, sizeof(*infoOut), 0 );
+		memset( infoOut, 0, sizeof(*infoOut) );
 		
 		infoOut->m_status = -1;
 	}
@@ -1292,7 +1310,7 @@ void	CGLMShaderPairCache::QueryShaderPair( int index, GLMShaderPairInfo *infoOut
 		else
 		{
 			// not
-			memset( infoOut, sizeof(*infoOut), 0 );
+			memset( infoOut, 0, sizeof(*infoOut) );
 			infoOut->m_status = 0;
 		}
 	}

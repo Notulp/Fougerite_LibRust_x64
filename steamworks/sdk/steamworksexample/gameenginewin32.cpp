@@ -8,7 +8,8 @@
 #include "stdafx.h"
 #include "GameEngineWin32.h"
 #include <map>
-#include "steam/steamvr.h"
+#include "steam\isteaminput.h"
+#include "steam\isteamdualsense.h"
 
 #ifdef WIN32
 #include <direct.h>
@@ -127,7 +128,7 @@ public:
 //-----------------------------------------------------------------------------
 // Purpose: Constructor for game engine instance
 //-----------------------------------------------------------------------------
-CGameEngineWin32::CGameEngineWin32( HINSTANCE hInstance, int nShowCommand, int32 nWindowWidth, int32 nWindowHeight, bool bUseVR )
+CGameEngineWin32::CGameEngineWin32( HINSTANCE hInstance, int nShowCommand, int32 nWindowWidth, int32 nWindowHeight )
 {
 	m_bEngineReadyForUse = false;
 	m_bShuttingDown = false;
@@ -169,24 +170,6 @@ CGameEngineWin32::CGameEngineWin32( HINSTANCE hInstance, int nShowCommand, int32
 	m_ulGameTickCount = 0;
 	m_dwBackgroundColor = D3DCOLOR_ARGB(0, 255, 255, 255 );
 	m_pBackbufferDepth = NULL;
-	m_hVRDistortionMap[0] = NULL;
-	m_hVRDistortionMap[1] = NULL;
-	m_pVRDistortionPixelShader = NULL;
-
-	if ( !bUseVR )
-	{
-		m_pVRHmd = NULL;
-	}
-	else
-	{
-		vr::HmdError error;
-		m_pVRHmd = vr::VR_Init( &error );
-		if ( !m_pVRHmd )
-		{
-			::MessageBoxA( NULL, "Failed to initialize VR.\n\nGame will now exit.", "SteamworksExample - Fatal error", MB_OK | MB_ICONERROR );
-			return;
-		}
-	}
 
 	// for XAudio2
 	CoInitializeEx( NULL, COINIT_MULTITHREADED );
@@ -217,28 +200,10 @@ CGameEngineWin32::CGameEngineWin32( HINSTANCE hInstance, int nShowCommand, int32
 		return;
 	}
 
-	if ( m_pVRHmd )
-	{
-		// these sizes are used for the 2D rendering
-		m_nViewportWidth = 640;
-		m_nViewportHeight = 480;
-		m_hVR2DRenderTarget = HCreateTexture( NULL, m_nViewportWidth, m_nViewportHeight );
-
-		uint32 w, h;
-		m_pVRHmd->GetRecommendedRenderTargetSize( &w, &h );
-		m_hVRSceneRenderTarget = HCreateTexture( NULL, w, h );
-
-	}
-	else
-	{
-		RECT r;
-		::GetClientRect( m_hWnd, &r );
-		m_nViewportWidth = r.right - r.left;
-		m_nViewportHeight = r.bottom - r.top;
-
-		m_hVR2DRenderTarget = NULL;
-		m_hVRSceneRenderTarget = NULL;
-	}
+	RECT r;
+	::GetClientRect( m_hWnd, &r );
+	m_nViewportWidth = r.right - r.left;
+	m_nViewportHeight = r.bottom - r.top;
 
 	// initialize XAudio2 interface
 	if( FAILED( XAudio2Create( &m_pXAudio2, 0 ) ) )
@@ -250,11 +215,31 @@ CGameEngineWin32::CGameEngineWin32( HINSTANCE hInstance, int nShowCommand, int32
 	// Create a mastering voice
 	if( FAILED( m_pXAudio2->CreateMasteringVoice( &m_pMasteringVoice, XAUDIO2_DEFAULT_CHANNELS, VOICE_OUTPUT_SAMPLE_RATE ) ) )
 	{
-		::MessageBoxA( NULL, "Failed to create mastering voice", "SteamworksExample - Fatal error", MB_OK | MB_ICONERROR );
-		return;
+		::MessageBoxA( NULL, "Failed to create mastering voice", "SteamworksExample", MB_OK | MB_ICONERROR );
 	}
 
+
+	// clear the action handles
+	for ( int i = 0; i <eControllerDigitalAction_NumActions; i++ )
+	{
+		m_ControllerDigitalActionHandles[i] = 0;
+		m_ControllerDigitalActionOrigins[i] = k_EInputActionOrigin_None;
+	}
+	for ( int i = 0; i <eControllerAnalogAction_NumActions; i++ )
+	{
+		m_ControllerAnalogActionHandles[i] = 0;
+		m_ControllerAnalogActionOrigins[i] = k_EInputActionOrigin_None;
+	}
+	for ( int i = 0; i <eControllerActionSet_NumSets; i++ )
+	{
+		m_ControllerActionSetHandles[i] = 0;
+	}
+	m_ActiveControllerHandle = 0;
+
+	InitSteamInput( );
+
 	m_bEngineReadyForUse = true;
+
 }
 
 
@@ -318,7 +303,6 @@ void CGameEngineWin32::Shutdown()
 	SAFE_RELEASE( m_pD3D9Device );
 	SAFE_RELEASE( m_pD3D9Interface );
 	SAFE_RELEASE( m_pXAudio2 );
-	SAFE_RELEASE( m_pVRDistortionPixelShader );
 
 	// Destroy our window
 	if ( m_hWnd )
@@ -353,12 +337,6 @@ void CGameEngineWin32::Shutdown()
 	}
 
 	CoUninitialize();
-
-	if ( m_pVRHmd )
-	{
-		vr::VR_Shutdown();
-		m_pVRHmd = NULL;
-	}
 }
 
 
@@ -433,13 +411,6 @@ bool CGameEngineWin32::BHandleLostDevice()
 				iter->second.m_pDepthSurface = NULL;
 			}
 		}
-	}
-
-	// if we have a VR shader, free it We'll re-create it on demand
-	if ( m_pVRDistortionPixelShader )
-	{
-		m_pVRDistortionPixelShader->Release();
-		m_pVRDistortionPixelShader = NULL;
 	}
 
 	return bFullySuccessful;
@@ -567,17 +538,6 @@ bool CGameEngineWin32::BCreateGameWindow( int nShowCommand )
 	int windowX = 0;
 	int windowY = 0;
 
-	if ( m_pVRHmd )
-	{
-		int32 x, y;
-		uint32 w, h;
-		m_pVRHmd->GetWindowBounds( &x, &y, &w, &h );
-		m_nWindowWidth = w;
-		m_nWindowHeight = h;
-		windowX = x;
-		windowY = y;
-	}
-
 	WNDCLASS wc;
 	DWORD	 style;
 
@@ -600,10 +560,7 @@ bool CGameEngineWin32::BCreateGameWindow( int nShowCommand )
 	}
 
 	// Set parent window mode (normal system window with overlap/draw-ordering)
-	if ( m_pVRHmd )
-		style = WS_POPUP;
-	else
-		style = WS_OVERLAPPED|WS_SYSMENU;
+	style = WS_OVERLAPPED|WS_SYSMENU;
 
 	// Create actual window
 	m_hWnd = CreateWindow( "SteamworksExample", 
@@ -669,10 +626,6 @@ bool CGameEngineWin32::BInitializeD3D9()
 		m_d3dpp.BackBufferFormat  = d3ddisplaymode.Format; 
 
 		UINT nAdapter = D3DADAPTER_DEFAULT;
-		if ( m_pVRHmd )
-		{
-			nAdapter = m_pVRHmd->GetD3D9AdapterIndex();
-		}
 
 		// Create Direct3D9 device 
 		// (if it fails to create hardware vertex processing, then go with the software alternative).
@@ -751,6 +704,9 @@ bool CGameEngineWin32::StartFrame()
 	if ( !m_pD3D9Device )
 		return false;
 
+	// Poll Steam Controllers
+	PollSteamInput();
+
 	// Test that we haven't lost the device
 	HRESULT hRes = m_pD3D9Device->TestCooperativeLevel();
 	if ( hRes == D3DERR_DEVICELOST )
@@ -790,6 +746,7 @@ bool CGameEngineWin32::StartFrame()
 			OutputDebugString( "Reset() call on device failed\n" );
 			::MessageBox( m_hWnd, "m_pD3D9Device->Reset() call has failed unexpectedly\n", "Fatal Error", MB_OK );
 			Shutdown();
+			return false;
 		}
 	}
 
@@ -802,24 +759,10 @@ bool CGameEngineWin32::StartFrame()
 	if ( FAILED( hRes ) )
 		return false;
 
-	// if we're in VR mode, set the 2D offscreen rendertarget
-	if ( m_pVRHmd )
-	{
-		if ( !BSetRenderTarget( m_hVR2DRenderTarget ) )
-			return false;
-
-		// Clear the back buffer and z-buffer with an opaque color
-		hRes = m_pD3D9Device->Clear( 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_ARGB( 255, 0, 0, 0), 1.0f, 0 );
-		if ( FAILED( hRes ) )
-			return false;
-	}
-	else
-	{
-		// Clear the back buffer and z-buffer
-		hRes = m_pD3D9Device->Clear( 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, m_dwBackgroundColor, 1.0f, 0 );
-		if ( FAILED( hRes ) )
-			return false;
-	}
+	// Clear the back buffer and z-buffer
+	hRes = m_pD3D9Device->Clear( 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, m_dwBackgroundColor, 1.0f, 0 );
+	if ( FAILED( hRes ) )
+		return false;
 
 
 	return true;
@@ -858,141 +801,6 @@ void CGameEngineWin32::EndFrame()
 	BFlushQuadBuffer();
 
 	// draw the VR mode offscreen render target on a quad somewhere
-	if ( m_pVRHmd )
-	{
-		// make sure we have a distortion shader
-		if ( !m_pVRDistortionPixelShader )
-		{
-			if ( !BInitializeVRShader() )
-			{
-				OutputDebugString( "Unable to init VR shader\n" );
-				return;
-			}
-		}
-
-		// draw some lines around the edge of the "screen" in the 2D texture so that it's very obvious 
-		// where the boundary is to aid stereo fusion
-		DWORD dwBorderColor = D3DCOLOR_ARGB( 255, 128, 128, 128 );
-		float fViewWidth = (float)GetViewportWidth();
-		float fViewHeight = (float)GetViewportHeight();
-
-		for ( float f = 0; f < 5.f; f += 1.f )
-		{
-			BDrawLine( 0 + f, 0 + f, dwBorderColor, fViewWidth - f, 0 + f, dwBorderColor );
-			BDrawLine( 0 + f, fViewHeight - f, dwBorderColor, fViewWidth - f, fViewHeight - f, dwBorderColor );
-			BDrawLine( 0 + f, 0 + f, dwBorderColor, 0 + f, fViewHeight - f, dwBorderColor );
-			BDrawLine( fViewWidth - f, 0 + f, dwBorderColor, fViewWidth - f, fViewHeight - f, dwBorderColor );
-		}
-		BFlushLineBuffer();
-
-		// Clear the frame buffer
-		BUnsetRenderTarget();
-		hRes = m_pD3D9Device->Clear( 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, m_dwBackgroundColor, 1.0f, 0 );
-
-		float fHeight = (float)GetViewportHeight( ) / (float)GetViewportWidth( );
-		Textured3DQuadVertex_t vScreenQuad[4] = 
-		{
-			{ 
-				-1.f, fHeight, -2.f,
-				0xFFFFFFFF,
-				0.f, 0.f,
-			},
-			{
-				1.f, fHeight , -2.f,
-				0xFFFFFFFF,
-				1.f, 0.f,
-			},
-			{
-				-1.f, -fHeight , -2.f,
-				0xFFFFFFFF,
-				0.f, 1.f,
-			},
-			{
-				1.f, -fHeight , -2.f,
-				0xFFFFFFFF,
-				1.f, 1.f,
-			}
-		};
-		Textured3DQuadVertex_t vScreenQuadInverse[4];
-		for ( int i = 0; i < 4; i++ )
-		{
-			vScreenQuadInverse[i] = vScreenQuad[3 - i];
-		}
-
-		vr::HmdTrackingResult eResult;
-		vr::HmdMatrix44_t matLeftView, matRightView;
-		bool bGotPose = m_pVRHmd->GetViewMatrix( 0, &matLeftView, &matRightView, &eResult );
-		for ( int i = 0; i < 2; i++ )
-		{
-
-			vr::Hmd_Eye eye = (vr::Hmd_Eye)i;
-
-			if ( !BSetRenderTarget( m_hVRSceneRenderTarget ) )
-			{
-				OutputDebugString( "Unable to set scene render target\n" );
-				return;
-			}
-			hRes = m_pD3D9Device->Clear( 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_ARGB( 0, 50, 50, 50 ), 1.0f, 0 );
-
-			if ( !m_hTextureWhite )
-			{
-				byte *pRGBAData = new byte[1 * 1 * 4];
-				memset( pRGBAData, 255, 1 * 1 * 4 );
-				m_hTextureWhite = HCreateTexture( pRGBAData, 1, 1 );
-				delete[] pRGBAData;
-			}
-
-			vr::HmdMatrix44_t matProjection = m_pVRHmd->GetProjectionMatrix( eye, 0.1f, 100.f, vr::API_DirectX );
-			D3DXMATRIX matD3DProj = D3DXMATRIX( &matProjection.m[0][0] );
-			D3DXMATRIX matD3DProj_transposed;
-			D3DXMatrixTranspose( &matD3DProj_transposed, &matD3DProj );
-			m_pD3D9Device->SetTransform( D3DTS_PROJECTION, &matD3DProj_transposed );
-
-			D3DXMATRIX matD3DView;
-			if ( eye == vr::Eye_Left )
-				matD3DView = D3DXMATRIX( &matLeftView.m[0][0] );
-			else
-				matD3DView = D3DXMATRIX( &matRightView.m[0][0] );
-			D3DXMATRIX matD3DView_transposed;
-			D3DXMatrixTranspose( &matD3DView_transposed, &matD3DView );
-			m_pD3D9Device->SetTransform( D3DTS_VIEW, &matD3DView_transposed );
-
-
-			// draw the 2D texture on a quad into the 3D render target
-			BDraw3DTexturedQuad( vScreenQuad, m_hVR2DRenderTarget );
-			//BDraw3DTexturedQuad( vScreenQuadInverse, m_hVR2DRenderTarget );
-			BFlush3DQuadBuffer( );
-
-			// now draw the scene to the frame buffer with the distortion texture
-			BUnsetRenderTarget();
-
-			// get the viewport from the Hmd
-			uint32 vpx, vpy, vpw, vph;
-			m_pVRHmd->GetEyeOutputViewport( eye, &vpx, &vpy, &vpw, &vph );
-
-			if ( FAILED( m_pD3D9Device->SetPixelShader( m_pVRDistortionPixelShader ) ) )
-			{
-				OutputDebugString( "Couldn't set VR pixel shader\n" );
-			}
-
-			if ( !BReadyTexture( m_hVRDistortionMap[i] ) )
-			{
-				OutputDebugString( "Couldn't ready distortion map\n" );
-			}
-			if ( FAILED( m_pD3D9Device->SetTexture( 1, m_MapTextures[m_hVRDistortionMap[i]].m_pTexture ) ) )
-			{
-				OutputDebugString( "Couldn't set distortion map\n" );
-			}
-
-
-			BDrawTexturedQuad( (float)vpx, (float)vpy, (float)(vpx + vpw), (float)(vpy + vph), 0, 0, 1.f, 1.f, D3DCOLOR_ARGB( 255, 255, 255, 255 ), m_hVRSceneRenderTarget );
-			BFlushQuadBuffer();
-
-			m_pD3D9Device->SetTexture( 1, NULL );
-			m_pD3D9Device->SetPixelShader( NULL );
-		}
-	}
-
 	hRes = m_pD3D9Device->EndScene();
 	if ( FAILED( hRes ) ) 
 	{
@@ -1453,7 +1261,7 @@ bool CGameEngineWin32::BFlushPointBuffer()
 //-----------------------------------------------------------------------------
 // Purpose: Draw a filled quad
 //-----------------------------------------------------------------------------
-bool CGameEngineWin32::BDrawFilledQuad( float xPos0, float yPos0, float xPos1, float yPos1, DWORD dwColor )
+bool CGameEngineWin32::BDrawFilledRect( float xPos0, float yPos0, float xPos1, float yPos1, DWORD dwColor )
 {
 	if ( !m_hTextureWhite )
 	{
@@ -1463,13 +1271,13 @@ bool CGameEngineWin32::BDrawFilledQuad( float xPos0, float yPos0, float xPos1, f
 		delete[] pRGBAData;
 	}
 
-	return BDrawTexturedQuad( xPos0, yPos0, xPos1, yPos1, 0.0f, 0.0f, 1.0f, 1.0f, dwColor, m_hTextureWhite );
+	return BDrawTexturedRect( xPos0, yPos0, xPos1, yPos1, 0.0f, 0.0f, 1.0f, 1.0f, dwColor, m_hTextureWhite );
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: Draw a textured quad
 //-----------------------------------------------------------------------------
-bool CGameEngineWin32::BDrawTexturedQuad( float xPos0, float yPos0, float xPos1, float yPos1, float u0, float v0, float u1, float v1, DWORD dwColor, HGAMETEXTURE hTexture )
+bool CGameEngineWin32::BDrawTexturedRect( float xPos0, float yPos0, float xPos1, float yPos1, float u0, float v0, float u1, float v1, DWORD dwColor, HGAMETEXTURE hTexture )
 {
 	if ( !m_pD3D9Device )
 		return false;
@@ -1568,6 +1376,111 @@ bool CGameEngineWin32::BDrawTexturedQuad( float xPos0, float yPos0, float xPos1,
 
 	return true;
 }
+
+//-----------------------------------------------------------------------------
+// Purpose: Draw a textured quad
+//-----------------------------------------------------------------------------
+bool CGameEngineWin32::BDrawTexturedQuad( float xPos0, float yPos0, float xPos1, float yPos1, float xPos2, float yPos2 , float xPos3, float yPos3,
+	float u0, float v0, float u1, float v1, DWORD dwColor, HGAMETEXTURE hTexture )
+{
+	if ( !m_pD3D9Device )
+		return false;
+
+	if ( m_bDeviceLost )
+		return true; // Fail silently in this case
+
+	// Find the texture
+	std::map<HGAMETEXTURE, TextureData_t>::iterator iter;
+	iter = m_MapTextures.find( hTexture );
+	if ( iter == m_MapTextures.end() )
+	{
+		OutputDebugString( "BDrawTexturedQuad called with invalid hTexture value\n" );
+		return false;
+	}
+
+	if ( !m_hQuadBuffer )
+	{
+		// Create the line buffer
+		m_hQuadBuffer = HCreateVertexBuffer( sizeof(TexturedQuadVertex_t)* QUAD_BUFFER_TOTAL_SIZE * 4, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1 );
+
+		if ( !m_hQuadBuffer )
+		{
+			OutputDebugString( "Can't BDrawTexturedQuad() because vertex buffer creation failed\n" );
+			return false;
+		}
+	}
+
+	// Check if we are out of room and need to flush the buffer
+	if ( m_dwQuadsToFlush == QUAD_BUFFER_BATCH_SIZE )
+	{
+		BFlushQuadBuffer();
+	}
+
+	// Check if the texture changed so we need to flush the buffer
+	if ( m_hLastTexture != hTexture )
+	{
+		BFlushQuadBuffer();
+	}
+
+	// Save the texture to use for next flush
+	m_hLastTexture = hTexture;
+
+	if ( !BSetFVF( D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1 ) )
+	{
+		OutputDebugString( "Setting FVF failed for textured rect drawing\n" );
+		return false;
+	}
+
+	// Lock the vertex buffer into memory
+	if ( !m_pQuadVertexes )
+	{
+		if ( !BLockEntireVertexBuffer( m_hQuadBuffer, (void**)&m_pQuadVertexes, m_dwQuadBufferBatchPos ? D3DLOCK_NOOVERWRITE : D3DLOCK_DISCARD ) )
+		{
+			m_pQuadVertexes = NULL;
+			OutputDebugString( "BDrawTexturedQuad failed because locking vertex buffer failed\n" );
+			return false;
+		}
+	}
+
+	TexturedQuadVertex_t *pVertData = &m_pQuadVertexes[m_dwQuadBufferBatchPos * 4 + m_dwQuadsToFlush * 4];
+
+	pVertData[0].color = dwColor;
+	pVertData[0].rhw = 1.0f;
+	pVertData[0].z = 1.0f;
+	pVertData[0].x = xPos0;
+	pVertData[0].y = yPos0;
+	pVertData[0].u = u0;
+	pVertData[0].v = v0;
+
+	pVertData[1].color = dwColor;
+	pVertData[1].rhw = 1.0f;
+	pVertData[1].z = 1.0f;
+	pVertData[1].x = xPos1;
+	pVertData[1].y = yPos1;
+	pVertData[1].u = u1;
+	pVertData[1].v = v0;
+
+	pVertData[2].color = dwColor;
+	pVertData[2].rhw = 1.0f;
+	pVertData[2].z = 1.0f;
+	pVertData[2].x = xPos2;
+	pVertData[2].y = yPos2;
+	pVertData[2].u = u0;
+	pVertData[2].v = v1;
+
+	pVertData[3].color = dwColor;
+	pVertData[3].rhw = 1.0f;
+	pVertData[3].z = 1.0f;
+	pVertData[3].x = xPos3;
+	pVertData[3].y = yPos3;
+	pVertData[3].u = u1;
+	pVertData[3].v = v1;
+
+	++m_dwQuadsToFlush;
+
+	return true;
+}
+
 
 //-----------------------------------------------------------------------------
 // Purpose: Draw a 3D textured quad
@@ -1845,17 +1758,22 @@ bool CGameEngineWin32::BRenderPrimitive( D3DPRIMITIVETYPE primType, uint32 uStar
 //-----------------------------------------------------------------------------
 // Purpose: Creates a new texture 
 //-----------------------------------------------------------------------------
-HGAMETEXTURE CGameEngineWin32::HCreateTexture( byte *pRGBAData, uint32 uWidth, uint32 uHeight )
-{
-	return HCreateTextureInternal( pRGBAData, uWidth, uHeight, D3DFMT_A8R8G8B8 );
-}
-
-
-// Create a new texture returning our internal handle value for it (0 means failure)
-HGAMETEXTURE CGameEngineWin32::HCreateTextureInternal( byte *pRGBAData, uint32 uWidth, uint32 uHeight, D3DFORMAT eFormat )
+HGAMETEXTURE CGameEngineWin32::HCreateTexture( byte *pRGBAData, uint32 uWidth, uint32 uHeight, ETEXTUREFORMAT eTextureFormat )
 {
 	if ( !m_pD3D9Device )
 		return 0;
+
+	D3DFORMAT eD3DDeviceFormat = D3DFMT_A8R8G8B8;
+
+	switch ( eTextureFormat )
+	{
+	case eTextureFormat_RGBA:
+	case eTextureFormat_BGRA:
+		eD3DDeviceFormat = D3DFMT_A8R8G8B8;
+		break;
+	case eTextureFormat_BGRA16:
+		eD3DDeviceFormat = D3DFMT_A16B16G16R16;
+	}
 
 	TextureData_t TexData;
 	TexData.m_uWidth = uWidth;
@@ -1863,11 +1781,11 @@ HGAMETEXTURE CGameEngineWin32::HCreateTextureInternal( byte *pRGBAData, uint32 u
 	if ( pRGBAData )
 	{
 		size_t dataSize = 0;
-		if ( eFormat == D3DFMT_A8B8G8R8 )
+		if ( eD3DDeviceFormat == D3DFMT_A8R8G8B8 )
 		{
 			dataSize = uWidth*uHeight * 4;
 		}
-		else if ( eFormat == D3DFMT_A16B16G16R16 )
+		else if ( eD3DDeviceFormat == D3DFMT_A16B16G16R16 )
 		{
 			dataSize = sizeof(uint16)* 4 * uWidth * uHeight;
 		}
@@ -1880,7 +1798,8 @@ HGAMETEXTURE CGameEngineWin32::HCreateTextureInternal( byte *pRGBAData, uint32 u
 	}
 	TexData.m_pTexture = NULL;
 	TexData.m_pDepthSurface = NULL;
-	TexData.m_eFormat = eFormat;
+	TexData.m_eFormat = eD3DDeviceFormat;
+	TexData.m_eTextureFormat = eTextureFormat;
 
 	int nHandle = m_nNextTextureHandle;
 	++m_nNextTextureHandle;
@@ -1970,6 +1889,261 @@ void CGameEngineWin32::MessagePump()
 	}
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Return true if there is an active Steam Controller
+//-----------------------------------------------------------------------------
+bool CGameEngineWin32::BIsSteamInputDeviceActive( )
+{
+	if ( m_ActiveControllerHandle )
+	{
+		return true;
+	}
+	
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Initialize the steam controller actions
+//-----------------------------------------------------------------------------
+void CGameEngineWin32::InitSteamInput( )
+{
+	// Digital game actions
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_TurnLeft] = SteamInput()->GetDigitalActionHandle( "turn_left" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_TurnRight] = SteamInput()->GetDigitalActionHandle( "turn_right" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_ForwardThrust] = SteamInput()->GetDigitalActionHandle( "forward_thrust" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_ReverseThrust] = SteamInput()->GetDigitalActionHandle( "backward_thrust" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_FireLasers] = SteamInput()->GetDigitalActionHandle( "fire_lasers" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_PauseMenu] = SteamInput()->GetDigitalActionHandle( "pause_menu" );
+
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_MenuUp] = SteamInput()->GetDigitalActionHandle( "menu_up" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_MenuDown] = SteamInput()->GetDigitalActionHandle( "menu_down" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_MenuLeft] = SteamInput()->GetDigitalActionHandle( "menu_left" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_MenuRight] = SteamInput()->GetDigitalActionHandle( "menu_right" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_MenuSelect] = SteamInput()->GetDigitalActionHandle( "menu_select" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_MenuCancel] = SteamInput()->GetDigitalActionHandle( "menu_cancel" );
+
+	// Analog game actions
+	m_ControllerAnalogActionHandles[eControllerAnalogAction_AnalogControls] = SteamInput()->GetAnalogActionHandle( "analog_controls" );
+
+	// Action set handles
+	m_ControllerActionSetHandles[eControllerActionSet_ShipControls] = SteamInput()->GetActionSetHandle( "ship_controls" );
+	m_ControllerActionSetHandles[eControllerActionSet_MenuControls] = SteamInput()->GetActionSetHandle( "menu_controls" );
+
+	// Action set layer handle
+	m_ControllerActionSetHandles[eControllerActionSet_Layer_Thrust] = SteamInput()->GetActionSetHandle( "thrust_action_layer" );
+
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Find an active Steam controller
+//-----------------------------------------------------------------------------
+void CGameEngineWin32::FindActiveSteamInputDevice()
+{
+	// Use the first available steam controller for all interaction. We can call this each frame to handle
+	// a controller disconnecting and a different one reconnecting. Handles are guaranteed to be unique for
+	// a given controller, even across power cycles.
+
+	// See how many Steam Controllers are active. 
+	InputHandle_t pHandles[STEAM_CONTROLLER_MAX_COUNT];
+	int nNumActive = SteamInput( )->GetConnectedControllers( pHandles );
+
+	// If there's an active controller, and if we're not already using it, select the first one.
+	if ( nNumActive && ( m_ActiveControllerHandle != pHandles[0] ) )
+	{
+		m_ActiveControllerHandle = pHandles[ 0 ];
+	}
+	
+	return;
+}
+
+// These are human-readable names for each of the origin enumerations. It is preferred to 
+// show the supplied icons in-game, but for a simple application these strings can be useful.
+
+//--------------------------------------------------------------------------------------------------------------
+// Purpose: For a given in-game action in a given action set, return a human-reaadable string to use as a prompt.
+//--------------------------------------------------------------------------------------------------------------
+const char *CGameEngineWin32::GetTextStringForControllerOriginDigital( ECONTROLLERACTIONSET dwActionSet, ECONTROLLERDIGITALACTION dwDigitalAction )
+{
+	EInputActionOrigin origins[STEAM_CONTROLLER_MAX_ORIGINS];
+	int nNumOrigins = SteamInput( )->GetDigitalActionOrigins( m_ActiveControllerHandle, m_ControllerActionSetHandles[dwActionSet], m_ControllerDigitalActionHandles[dwDigitalAction], origins );
+	if ( nNumOrigins )
+	{
+		// We should handle the case where this action is bound to multiple buttons, but
+		// here we just grab the first.
+		return SteamInput()->GetStringForActionOrigin( origins[0] );
+	}
+	return SteamInput()->GetStringForActionOrigin( k_EInputActionOrigin_None ); // Return "None"
+}
+
+//--------------------------------------------------------------------------------------------------------------
+// Purpose: For a given in-game action in a given action set, return a human-reaadable string to use as a prompt.
+//--------------------------------------------------------------------------------------------------------------
+const char *CGameEngineWin32::GetTextStringForControllerOriginAnalog( ECONTROLLERACTIONSET dwActionSet, ECONTROLLERANALOGACTION dwDigitalAction )
+{
+	EInputActionOrigin origins[STEAM_CONTROLLER_MAX_ORIGINS];
+	int nNumOrigins = SteamInput( )->GetAnalogActionOrigins( m_ActiveControllerHandle, m_ControllerActionSetHandles[dwActionSet], m_ControllerDigitalActionHandles[dwDigitalAction], origins );
+
+	if ( nNumOrigins )
+	{
+		// We should handle the case where this action is bound to multiple buttons, but
+		// here we just grab the first.
+		return SteamInput()->GetStringForActionOrigin( origins[0] );
+	}
+
+	return SteamInput()->GetStringForActionOrigin( k_EInputActionOrigin_None ); // Return "None"
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Called each frame
+//-----------------------------------------------------------------------------
+void CGameEngineWin32::PollSteamInput()
+{
+
+	// Each frame check our active controller handle
+	FindActiveSteamInputDevice();
+
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: Set the LED color on the controller, if supported by controller
+//-----------------------------------------------------------------------------
+void CGameEngineWin32::SetControllerColor( uint8 nColorR, uint8 nColorG, uint8 nColorB, unsigned int nFlags )
+{
+	SteamInput()->SetLEDColor( m_ActiveControllerHandle, nColorR, nColorG, nColorB, nFlags );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Set the trigger effect on DualSense controllers
+//-----------------------------------------------------------------------------
+void CGameEngineWin32::SetTriggerEffect( bool bEnabled )
+{
+	ScePadTriggerEffectParam param;
+
+	memset( &param, 0, sizeof( param ) );
+	param.triggerMask = SCE_PAD_TRIGGER_EFFECT_TRIGGER_MASK_R2;
+
+	// Clear any existing effect
+	param.command[ SCE_PAD_TRIGGER_EFFECT_PARAM_INDEX_FOR_R2 ].mode = SCE_PAD_TRIGGER_EFFECT_MODE_OFF;
+	SteamInput()->SetDualSenseTriggerEffect( m_ActiveControllerHandle, &param );
+
+	if ( bEnabled )
+	{
+		param.command[ SCE_PAD_TRIGGER_EFFECT_PARAM_INDEX_FOR_R2 ].mode = SCE_PAD_TRIGGER_EFFECT_MODE_VIBRATION;
+		param.command[ SCE_PAD_TRIGGER_EFFECT_PARAM_INDEX_FOR_R2 ].commandData.vibrationParam.position = 5;
+		param.command[ SCE_PAD_TRIGGER_EFFECT_PARAM_INDEX_FOR_R2 ].commandData.vibrationParam.amplitude = 5;
+		param.command[ SCE_PAD_TRIGGER_EFFECT_PARAM_INDEX_FOR_R2 ].commandData.vibrationParam.frequency = 8;
+		SteamInput()->SetDualSenseTriggerEffect( m_ActiveControllerHandle, &param );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Trigger vibration on the controller, if supported by controller
+//-----------------------------------------------------------------------------
+void CGameEngineWin32::TriggerControllerVibration( unsigned short nLeftSpeed, unsigned short nRightSpeed )
+{
+	SteamInput()->TriggerVibration( m_ActiveControllerHandle, nLeftSpeed, nRightSpeed );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Trigger haptics on the controller, if supported by controller
+//-----------------------------------------------------------------------------
+void CGameEngineWin32::TriggerControllerHaptics( ESteamControllerPad ePad, unsigned short usOnMicroSec, unsigned short usOffMicroSec, unsigned short usRepeat )
+{
+	SteamInput()->Legacy_TriggerRepeatedHapticPulse( m_ActiveControllerHandle, ePad, usOnMicroSec, usOffMicroSec, usRepeat, 0 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Find out if a controller event is currently active
+//-----------------------------------------------------------------------------
+bool CGameEngineWin32::BIsControllerActionActive( ECONTROLLERDIGITALACTION dwAction )
+{
+	ControllerDigitalActionData_t digitalData = SteamInput( )->GetDigitalActionData( m_ActiveControllerHandle, m_ControllerDigitalActionHandles[dwAction] );
+
+	// Actions are only 'active' when they're assigned to a control in an action set, and that action set is active.
+	if ( digitalData.bActive )
+		return digitalData.bState;
+		
+	return false;
+}
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------
+// Purpose: Get the current x,y state of the analog action. Examples of an analog action are a virtual joystick on the trackpad or the real joystick.
+//---------------------------------------------------------------------------------------------------------------------------------------------------
+void CGameEngineWin32::GetControllerAnalogAction( ECONTROLLERANALOGACTION dwAction, float *x, float *y )
+{
+	ControllerAnalogActionData_t analogData = SteamInput( )->GetAnalogActionData( m_ActiveControllerHandle, m_ControllerAnalogActionHandles[dwAction] );
+
+	// Actions are only 'active' when they're assigned to a control in an action set, and that action set is active.
+	if ( analogData.bActive )
+	{
+		*x = analogData.x;
+		*y = analogData.y;
+	}
+	else
+	{
+		*x = 0.0f;
+		*y = 0.0f;
+	}
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+// Purpose: Put the controller into a specific action set. Action sets are collections of game-context actions ie "walking", "flying" or "menu"
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+void CGameEngineWin32::SetSteamControllerActionSet( ECONTROLLERACTIONSET dwActionSet )
+{
+	if ( m_ActiveControllerHandle == 0 )
+		return;
+
+	// This call is low-overhead and can be called repeatedly from game code that is active in a specific mode.
+	SteamInput()->ActivateActionSet( m_ActiveControllerHandle, m_ControllerActionSetHandles[dwActionSet] );
+}
+
+
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+// Purpose: Put the controller into a specific action set layer. Action sets layers apply modifications to an existing action set.
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+void CGameEngineWin32::ActivateSteamControllerActionSetLayer( ECONTROLLERACTIONSET dwActionSetLayer )
+{
+	if ( m_ActiveControllerHandle == 0 )
+		return;
+
+	// This call is low-overhead and can be called repeatedly from game code that is active in a specific mode.
+	SteamInput()->ActivateActionSetLayer( m_ActiveControllerHandle, m_ControllerActionSetHandles[ dwActionSetLayer ] );
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+// Purpose: Deactivate an existing action set layer
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+void CGameEngineWin32::DeactivateSteamControllerActionSetLayer( ECONTROLLERACTIONSET dwActionSetLayer )
+{
+	if ( m_ActiveControllerHandle == 0 )
+		return;
+
+	// This call is low-overhead and can be called repeatedly from game code that is active in a specific mode.
+	SteamInput()->DeactivateActionSetLayer( m_ActiveControllerHandle, m_ControllerActionSetHandles[ dwActionSetLayer ] );
+}
+
+
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+// Purpose: Determine whether an action set layer is currently active
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+bool CGameEngineWin32::BIsActionSetLayerActive( ECONTROLLERACTIONSET dwActionSetLayer )
+{
+	if ( m_ActiveControllerHandle == 0 )
+		return false;
+
+	ControllerActionSetHandle_t pActionSetLayerHandles[ 32 ];
+	int nActiveLayerCount = SteamInput()->GetActiveActionSetLayers( m_ActiveControllerHandle, pActionSetLayerHandles );
+
+	for( int i = 0; i < nActiveLayerCount; i++ )
+	{
+		if ( pActionSetLayerHandles[i] == m_ControllerActionSetHandles[ dwActionSetLayer ] )
+			return true;
+	}
+
+	return false;
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: Track keys which are down
@@ -2161,6 +2335,78 @@ bool CGameEngineWin32::AddVoiceData( HGAMEVOICECHANNEL hChannel, const uint8 *pV
 	return true;
 }
 
+
+//-----------------------------------------------------------------------------
+// Purpose: update an existing texture
+//-----------------------------------------------------------------------------
+bool CGameEngineWin32::UpdateTexture( HGAMETEXTURE hTexture, byte *pRGBAData, uint32 uWidth, uint32 uHeight, ETEXTUREFORMAT eTextureFormat )
+{
+	std::map<HGAMETEXTURE, TextureData_t>::iterator iter;
+	iter = m_MapTextures.find( hTexture );
+	if (iter == m_MapTextures.end())
+	{
+		OutputDebugString( "BFlushQuadBuffer failed with invalid m_hLastTexture value\n" );
+		return false;
+	}
+
+	// Put the data into the texture
+	D3DLOCKED_RECT rect;
+	HRESULT hRes = iter->second.m_pTexture->LockRect( 0, &rect, NULL, 0 );
+	if (FAILED( hRes ))
+	{
+		OutputDebugString( "LockRect call failed\n" );
+		iter->second.m_pTexture->Release();
+		iter->second.m_pTexture = NULL;
+		return false;
+	}
+
+	if (iter->second.m_eFormat == D3DFMT_A8R8G8B8)
+	{
+		DWORD *pARGB = (DWORD *)rect.pBits;
+		byte *pRGBA = (byte *)pRGBAData;
+
+		byte r, g, b, a;
+		for (uint32 y = 0; y < uHeight; ++y)
+		{
+			for (uint32 x = 0; x < uWidth; ++x)
+			{
+				// swap position of alpha value from back to front to be in correct format for d3d...
+				r = *pRGBA++;
+				g = *pRGBA++;
+				b = *pRGBA++;
+				a = *pRGBA++;
+
+				if ( eTextureFormat == eTextureFormat_RGBA )
+					*pARGB++ = D3DCOLOR_ARGB( a, r, g, b );
+				else if ( eTextureFormat == eTextureFormat_BGRA)
+					*pARGB++ = D3DCOLOR_ARGB( a, b, g, r );
+			}
+		}
+	}
+	else if (iter->second.m_eFormat == D3DFMT_A16B16G16R16)
+	{
+		uint16 *pDest = (uint16 *)rect.pBits;
+		uint16 *pSrc = (uint16 *)pRGBAData;
+
+		if ( eTextureFormat != eTextureFormat_BGRA16 )
+			OutputDebugString( "Unsupported texture format for BGRA16 texture \n" );
+
+		memcpy( pDest, pSrc, sizeof( uint16 )* uWidth * uHeight * 4 );
+	}
+
+	hRes = iter->second.m_pTexture->UnlockRect( 0 );
+	if (FAILED( hRes ))
+	{
+		OutputDebugString( "UnlockRect call failed\n" );
+		iter->second.m_pTexture->Release();
+		iter->second.m_pTexture = NULL;
+		return false;
+	}
+
+	return true;
+}
+
+
 bool CGameEngineWin32::BReadyTexture( HGAMETEXTURE hTexture )
 {
 	std::map<HGAMETEXTURE, TextureData_t>::iterator iter;
@@ -2214,7 +2460,7 @@ bool CGameEngineWin32::BReadyTexture( HGAMETEXTURE hTexture )
 				return false;
 			}
 
-			if ( iter->second.m_eFormat == D3DFMT_A8B8G8R8 )
+			if ( iter->second.m_eFormat == D3DFMT_A8R8G8B8 )
 			{
 				DWORD *pARGB = (DWORD *)rect.pBits;
 				byte *pRGBA = (byte *)iter->second.m_pRGBAData;
@@ -2230,7 +2476,10 @@ bool CGameEngineWin32::BReadyTexture( HGAMETEXTURE hTexture )
 						b = *pRGBA++;
 						a = *pRGBA++;
 
-						*pARGB++ = D3DCOLOR_ARGB( a, r, g, b );
+						if ( iter->second.m_eTextureFormat == eTextureFormat_RGBA )
+							*pARGB++ = D3DCOLOR_ARGB( a, r, g, b );
+						else
+							*pARGB++ = D3DCOLOR_ARGB( a, b, g, r );
 					}
 				}
 			}
@@ -2238,6 +2487,9 @@ bool CGameEngineWin32::BReadyTexture( HGAMETEXTURE hTexture )
 			{
 				uint16 *pDest = (uint16 *)rect.pBits;
 				uint16 *pSrc = (uint16 *)iter->second.m_pRGBAData;
+		
+				if ( iter->second.m_eTextureFormat != eTextureFormat_BGRA16 )
+					OutputDebugString( "Unsupported texture format for BGRA16 texture \n" );
 
 				memcpy( pDest, pSrc, sizeof(uint16)* iter->second.m_uWidth * iter->second.m_uHeight * 4 );
 			}
@@ -2348,181 +2600,4 @@ bool CGameEngineWin32::BUnsetRenderTarget()
 	return true;
 }
 
-
-// Quick and dirty wrapper for working with UV coordinates.
-template<typename T>
-struct TUV
-{
-	T x, y;
-	TUV() {}
-	TUV( T _x, T _y )
-		: x( _x ), y( _y ) {}
-	TUV( const float a[2] )
-		: x( a[0] ), y( a[1] ) {}
-	TUV( const TUV& other )
-		: x( other.x ), y( other.y ) {}
-	inline TUV operator*(T scale) const
-	{
-		return TUV( x * scale, y * scale );
-	}
-	inline TUV operator+(const TUV& other) const
-	{
-		return TUV( x + other.x, y + other.y );
-	}
-	inline TUV operator-(const TUV& other) const
-	{
-		return TUV( x - other.x, y - other.y );
-	}
-};
-
-template<typename T>
-inline TUV<T> operator*(T scale, const TUV<T> v)
-{
-	return TUV<T>( scale * v.x, scale * v.y );
-}
-
-typedef TUV<float> UVf;
-typedef TUV<double> UVd;
-
-// Loads the VR distortion shader off disk
-bool CGameEngineWin32::BInitializeVRShader()
-{
-	if ( !m_pVRHmd )
-	{
-		OutputDebugString( "Don't call BInitializeVRShader unless the game is in VR mode\n" );
-		return false;
-	}
-
-	char szCurDir[MAX_PATH];
-	_getcwd( szCurDir, sizeof(szCurDir) );
-	char szShaderPath[MAX_PATH];
-	sprintf_safe( szShaderPath, "%s\\D3D9VRDistort.cso", szCurDir );
-
-	FILE *pFile = fopen( szShaderPath, "rb" );
-	if ( !pFile )
-	{
-		OutputDebugString( "Failed opening D3D9Overlay.cso for reading\n" );
-		return false;
-	}
-
-	// Figure out the filesize
-	fseek( pFile, 0, SEEK_END );
-	size_t lSize = ftell( pFile );
-	bool bSuccess = false;
-	rewind( pFile );
-	if ( lSize )
-	{
-		// Allocate a buffer to read the file into
-		char *rgchBuffer = new char[lSize];
-		if ( !rgchBuffer )
-		{
-			OutputDebugString( "Memory allocation failure\n" );
-		}
-		else
-		{
-			size_t result = fread( rgchBuffer, 1, lSize, pFile );
-			if ( result != lSize )
-			{
-				OutputDebugString( "Failed reading from cso file\n" );
-			}
-			else
-			{
-				HRESULT hRes = m_pD3D9Device->CreatePixelShader( (DWORD*)rgchBuffer, &m_pVRDistortionPixelShader );
-				if ( SUCCEEDED( hRes ) && m_pVRDistortionPixelShader )
-				{
-					OutputDebugString( "Created IDirect3DPixelShader9 from memory ok!\n" );
-					bSuccess = true;
-				}
-				else
-				{
-					OutputDebugString( "Creating effect from memory failed!\n" );
-				}
-			}
-
-			delete[] rgchBuffer;
-		}
-	}
-	fclose( pFile );
-
-	if ( !bSuccess )
-		return false;
-
-	int nDistSize = 128;
-	int elem_span = 4;
-
-	struct DistortionSample_t
-	{
-		uint16 redU;
-		uint16 redV;
-		uint16 blueU;
-		uint16 blueV;
-	};
-
-	for ( int i = 0; i < 2; i++ )
-	{
-		// we only need to do this once
-		if ( m_hVRDistortionMap[i] != 0 )
-			continue;
-
-		vr::Hmd_Eye eye = (vr::Hmd_Eye)i;
-
-		uint16 *pData = (uint16 *)malloc( sizeof(uint16)* elem_span * nDistSize * nDistSize );
-
-		for ( int yi = 0; yi < nDistSize; yi++ )
-		{
-			const float v = (yi + 0.5f) / (float)nDistSize;
-			for ( int xi = 0; xi < nDistSize; xi++ )
-			{
-				const float u = (xi + 0.5f) / (float)nDistSize;
-
-				vr::DistortionCoordinates_t coords = m_pVRHmd->ComputeDistortion( eye, u, v );
-				UVf samp_red( coords.rfRed );
-				UVf samp_green( coords.rfGreen );
-				UVf samp_blue( coords.rfBlue );
-
-				static const float rg_to_rb_ratio = 0.522f;
-				UVf red_to_blue = samp_blue - samp_red;
-				UVf tex_samp_red = samp_green - rg_to_rb_ratio * red_to_blue;
-				UVf tex_samp_blue = samp_green + (1 - rg_to_rb_ratio) * red_to_blue;
-
-				if ( tex_samp_red.x < 0.0 || tex_samp_blue.x < 0.0 )
-				{
-					tex_samp_red.x = tex_samp_blue.x = 0.0;
-				}
-
-				if ( tex_samp_red.x > 1.0 || tex_samp_blue.x > 1.0 )
-				{
-					tex_samp_red.x = tex_samp_blue.x = 1.0;
-				}
-
-				if ( tex_samp_red.y < 0.0 || tex_samp_blue.y < 0.0 )
-				{
-					tex_samp_red.y = tex_samp_blue.y = 0.0;
-				}
-
-				if ( tex_samp_red.y > 1.0 || tex_samp_blue.y > 1.0 )
-				{
-					tex_samp_red.y = tex_samp_blue.y = 1.0;
-				}
-
-				int idx = yi * nDistSize + xi;
-
-				pData[idx * elem_span + 0] = (uint16)(tex_samp_red.x * 65535.f );
-				pData[idx * elem_span + 1] = (uint16)(tex_samp_red.y * 65535.f );
-				pData[idx * elem_span + 2] = (uint16)(tex_samp_blue.x * 65535.f );
-				pData[idx * elem_span + 3] = (uint16)(tex_samp_blue.y * 65535.f );
-			}
-		}
-
-		m_hVRDistortionMap[i] = HCreateTextureInternal( (byte *)pData, nDistSize, nDistSize, D3DFMT_A16B16G16R16 );
-		free( pData );
-		if ( !m_hVRDistortionMap[i] )
-		{
-			OutputDebugString( "Unable to create distortion texture\n" );
-			return false;
-		}
-
-	}
-	return true;
-}
 

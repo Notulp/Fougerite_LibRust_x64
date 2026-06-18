@@ -1,6 +1,6 @@
 //========= Copyright 1996-2008, Valve LLC, All rights reserved. ============
 //
-// Purpose: Main class for the game engine -- win32 implementation
+// Purpose: Main class for the game engine -- osx implementation
 //
 // $NoKeywords: $
 //=============================================================================
@@ -15,6 +15,28 @@
 #include "glstringosx.h"
 #include "gameengineosx.h"
 
+#include "steam/isteamdualsense.h"
+
+#if MAC_OS_X_VERSION_MIN_REQUIRED < 101400
+#define NSOpenGLContextParameterSwapInterval NSOpenGLCPSwapInterval
+
+#if MAC_OS_X_VERSION_MIN_REQUIRED < 101200
+#define NSWindowStyleMaskTitled NSTitledWindowMask
+#define NSWindowStyleMaskClosable  NSClosableWindowMask
+#define NSWindowStyleMaskResizable NSResizableWindowMask
+
+#define NSEventTypeKeyDown NSKeyDown
+#define NSEventTypeKeyUp NSKeyUp
+#define NSEventTypeFlagsChanged NSFlagsChanged
+
+#define NSEventModifierFlagShift NSShiftKeyMask
+#define NSEventModifierFlagControl NSControlKeyMask
+#define NSEventModifierFlagOption NSAlternateKeyMask
+
+#define NSEventMaskAny NSAnyEventMask
+#endif
+
+#endif
 
 CGameEngineGL *g_engine;		// dxabstract will use this.. it is set by the engine constructor
 
@@ -30,11 +52,11 @@ IGameEngine *CreateGameEngineOSX()
 	return s_pGameEngine;
 }
 
-inline uint64_t GetTickCount()
+uint64_t GetTickCount()
 {
-    timeval time;
-    gettimeofday(&time, NULL);
-    return (time.tv_sec * 1000ULL) + (time.tv_usec / 1000ULL);
+	timeval time;
+	gettimeofday(&time, NULL);
+	return (time.tv_sec * 1000ULL) + (time.tv_usec / 1000ULL);
 }
 
 void OutputDebugString( const char *pchMsg )
@@ -112,6 +134,7 @@ public:
 }
 
 @end
+
 
 //-----------------------------------------------------------------------------
 // Purpose: Constructor for game engine instance
@@ -294,9 +317,9 @@ bool CGameEngineGL::BInitializeGraphics()
 
 	ProcessSerialNumber psn = { 0, kCurrentProcess };
 	TransformProcessType( &psn, kProcessTransformToForegroundApplication );
-	SetFrontProcess( &psn );
-	
-	uint32_t mask = NSTitledWindowMask | NSClosableWindowMask| NSResizableWindowMask;
+	[[GLApplication sharedApplication] activateIgnoringOtherApps: YES];
+
+	uint32_t mask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable;
 
 	GLuint attribs[] = 
 	{
@@ -311,13 +334,13 @@ bool CGameEngineGL::BInitializeGraphics()
 	
 	NSOpenGLPixelFormat* pixelFormat = [[NSOpenGLPixelFormat alloc] initWithAttributes: (NSOpenGLPixelFormatAttribute*) attribs];
 
-	NSApplication *app = [GLApplication sharedApplication];
-	
 	NSApplicationLoad();
 
 	m_view = [[NSOpenGLView alloc] initWithFrame:NSMakeRect( 0, 0, m_nWindowWidth, m_nWindowHeight )
 									 pixelFormat:pixelFormat];
-	
+
+	m_view.wantsBestResolutionOpenGLSurface = NO;
+
 	
 	int wherex = 50;
 	int wherey = 50;
@@ -329,10 +352,10 @@ bool CGameEngineGL::BInitializeGraphics()
 	[m_window setAcceptsMouseMovedEvents:YES];
 	
 	GLint swapInt = 1;
-	[[m_view openGLContext] setValues:&swapInt forParameter:NSOpenGLCPSwapInterval];
+	[[m_view openGLContext] setValues:&swapInt forParameter:NSOpenGLContextParameterSwapInterval];
+	[[m_view openGLContext] makeCurrentContext];
 
 	[m_window setContentView:m_view];
-	[m_view release];
 	
 	[m_window makeKeyAndOrderFront:nil];
 	// [m_view setPostsFrameChangedNotifications:YES];
@@ -624,13 +647,9 @@ bool CGameEngineGL::BInitializeGraphics()
 #else	
 	void CGameEngineGL::AdjustViewport()
 	{
-		NSRect viewBounds = { { 0, 0 }, { m_nWindowWidth, m_nWindowHeight} };
-		
-		if( !NSEqualRects( [m_view bounds], viewBounds ) )
-		{
-			m_nWindowWidth = [m_view bounds].size.width;
-			m_nWindowHeight = [m_view bounds].size.height;			
-		}
+		NSRect viewBounds = [m_view convertRectToBacking:m_view.bounds];
+		m_nWindowWidth = viewBounds.size.width;
+		m_nWindowHeight = viewBounds.size.height;
 
 		// Perspective
 		glMatrixMode(GL_PROJECTION);
@@ -722,6 +741,9 @@ bool CGameEngineGL::StartFrame()
 	// We may now be shutting down, check and don't start a frame then
 	if ( BShuttingDown() )
 		return false;
+
+	// Poll Steam Input devices
+	PollSteamInput();
 
 	#if DX9MODE
 		uint bkcolor = m_dwBackgroundColor;
@@ -1333,7 +1355,7 @@ bool CGameEngineGL::BFlushPointBuffer()
 //-----------------------------------------------------------------------------
 // Purpose: Draw a filled quad
 //-----------------------------------------------------------------------------
-bool CGameEngineGL::BDrawFilledQuad( float xPos0, float yPos0, float xPos1, float yPos1, DWORD dwColor )
+bool CGameEngineGL::BDrawFilledRect( float xPos0, float yPos0, float xPos1, float yPos1, DWORD dwColor )
 {
 	#if DX9MODE
 		if ( !m_hTextureWhite )
@@ -1361,7 +1383,7 @@ bool CGameEngineGL::BDrawFilledQuad( float xPos0, float yPos0, float xPos1, floa
 			delete[] pRGBAData;
 		}
 
-		return BDrawTexturedQuad( xPos0, yPos0, xPos1, yPos1, 0.0f, 0.0f, 1.0f, 1.0f, dwColor, m_hTextureWhite );
+		return BDrawTexturedRect( xPos0, yPos0, xPos1, yPos1, 0.0f, 0.0f, 1.0f, 1.0f, dwColor, m_hTextureWhite );
 	#else
 		if ( !m_hTextureWhite )
 		{
@@ -1371,15 +1393,15 @@ bool CGameEngineGL::BDrawFilledQuad( float xPos0, float yPos0, float xPos1, floa
 			delete[] pRGBAData;
 		}
 	
-		return BDrawTexturedQuad( xPos0, yPos0, xPos1, yPos1, 0.0f, 0.0f, 1.0f, 1.0f, dwColor, m_hTextureWhite );
+		return BDrawTexturedRect( xPos0, yPos0, xPos1, yPos1, 0.0f, 0.0f, 1.0f, 1.0f, dwColor, m_hTextureWhite );
 	#endif
 }
 
 
 //-----------------------------------------------------------------------------
-// Purpose: Draw a textured quad
+// Purpose: Draw a textured rect
 //-----------------------------------------------------------------------------
-bool CGameEngineGL::BDrawTexturedQuad( float xPos0, float yPos0, float xPos1, float yPos1, float u0, float v0, float u1, float v1, DWORD dwColor, HGAMETEXTURE hTexture )
+bool CGameEngineGL::BDrawTexturedRect( float xPos0, float yPos0, float xPos1, float yPos1, float u0, float v0, float u1, float v1, DWORD dwColor, HGAMETEXTURE hTexture )
 {
 	if ( m_bShuttingDown )
 		return false;
@@ -1393,7 +1415,7 @@ bool CGameEngineGL::BDrawTexturedQuad( float xPos0, float yPos0, float xPos1, fl
 		iter = m_MapTextures.find( hTexture );
 		if ( iter == m_MapTextures.end() )
 		{
-			OutputDebugString( "BDrawTexturedQuad called with invalid hTexture value\n" );
+			OutputDebugString( "BDrawTexturedRect called with invalid hTexture value\n" );
 			return false;
 		}
 
@@ -1404,7 +1426,7 @@ bool CGameEngineGL::BDrawTexturedQuad( float xPos0, float yPos0, float xPos1, fl
 
 			if ( !m_hQuadBuffer )
 			{
-				OutputDebugString( "Can't BDrawTexturedQuad() because vertex buffer creation failed\n" );
+				OutputDebugString( "Can't BDrawTexturedRect() because vertex buffer creation failed\n" );
 				return false;
 			}
 		}
@@ -1430,7 +1452,7 @@ bool CGameEngineGL::BDrawTexturedQuad( float xPos0, float yPos0, float xPos1, fl
 			if ( !BLockEntireVertexBuffer( m_hQuadBuffer, (void**)&m_pQuadVertexes, m_dwQuadBufferBatchPos ? D3DLOCK_NOOVERWRITE : D3DLOCK_DISCARD ) )
 			{
 				m_pQuadVertexes = NULL;
-				OutputDebugString( "BDrawTexturedQuad failed because locking vertex buffer failed\n" );
+				OutputDebugString( "BDrawTexturedRect failed because locking vertex buffer failed\n" );
 				return false;
 			}
 		}
@@ -1512,6 +1534,180 @@ bool CGameEngineGL::BDrawTexturedQuad( float xPos0, float yPos0, float xPos1, fl
 		m_rgflQuadsData[dwOffset+8] = 1.0;
 		m_rgflQuadsData[dwOffset+9] = xPos0;
 		m_rgflQuadsData[dwOffset+10] = yPos1;
+		m_rgflQuadsData[dwOffset+11] = 1.0;
+	
+		dwOffset = m_dwQuadsToFlush*16;
+		m_rgflQuadsColorData[dwOffset] = COLOR_RED( dwColor );
+		m_rgflQuadsColorData[dwOffset+1] = COLOR_GREEN( dwColor );
+		m_rgflQuadsColorData[dwOffset+2] = COLOR_BLUE( dwColor );
+		m_rgflQuadsColorData[dwOffset+3] = COLOR_ALPHA( dwColor );
+		m_rgflQuadsColorData[dwOffset+4] = COLOR_RED( dwColor );
+		m_rgflQuadsColorData[dwOffset+5] = COLOR_GREEN( dwColor );
+		m_rgflQuadsColorData[dwOffset+6] = COLOR_BLUE( dwColor );
+		m_rgflQuadsColorData[dwOffset+7] = COLOR_ALPHA( dwColor );
+		m_rgflQuadsColorData[dwOffset+8] = COLOR_RED( dwColor );
+		m_rgflQuadsColorData[dwOffset+9] = COLOR_GREEN( dwColor );
+		m_rgflQuadsColorData[dwOffset+10] = COLOR_BLUE( dwColor );
+		m_rgflQuadsColorData[dwOffset+11] = COLOR_ALPHA( dwColor );
+		m_rgflQuadsColorData[dwOffset+12] = COLOR_RED( dwColor );
+		m_rgflQuadsColorData[dwOffset+13] = COLOR_GREEN( dwColor );
+		m_rgflQuadsColorData[dwOffset+14] = COLOR_BLUE( dwColor );
+		m_rgflQuadsColorData[dwOffset+15] = COLOR_ALPHA( dwColor );
+	
+		dwOffset = m_dwQuadsToFlush*8;
+		m_rgflQuadsTextureData[dwOffset] = u0;
+		m_rgflQuadsTextureData[dwOffset+1] = v0;
+		m_rgflQuadsTextureData[dwOffset+2] = u1;
+		m_rgflQuadsTextureData[dwOffset+3] = v0;
+		m_rgflQuadsTextureData[dwOffset+4] = u1;
+		m_rgflQuadsTextureData[dwOffset+5] = v1;
+		m_rgflQuadsTextureData[dwOffset+6] = u0;
+		m_rgflQuadsTextureData[dwOffset+7] = v1;
+	
+	
+		++m_dwQuadsToFlush;
+	#endif
+	
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Draw a textured rect
+//-----------------------------------------------------------------------------
+bool CGameEngineGL::BDrawTexturedQuad( float xPos0, float yPos0, float xPos1, float yPos1, float xPos2, float yPos2, float xPos3, float yPos3,
+	float u0, float v0, float u1, float v1, DWORD dwColor, HGAMETEXTURE hTexture )
+{
+	if ( m_bShuttingDown )
+		return false;
+
+	#if DX9MODE
+		if ( !m_pD3D9Device )
+			return false;
+
+		// Find the texture
+		std::map<HGAMETEXTURE, TextureData_t>::iterator iter;
+		iter = m_MapTextures.find( hTexture );
+		if ( iter == m_MapTextures.end() )
+		{
+			OutputDebugString( "BDrawTexturedRect called with invalid hTexture value\n" );
+			return false;
+		}
+
+		if ( !m_hQuadBuffer )
+		{
+			// Create the line buffer
+			m_hQuadBuffer = HCreateVertexBuffer( sizeof( TexturedQuadVertex_t ) * QUAD_BUFFER_TOTAL_SIZE * 4, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1 );
+
+			if ( !m_hQuadBuffer )
+			{
+				OutputDebugString( "Can't BDrawTexturedRect() because vertex buffer creation failed\n" );
+				return false;
+			}
+		}
+
+		// Check if we are out of room and need to flush the buffer
+		if ( m_dwQuadsToFlush == QUAD_BUFFER_BATCH_SIZE )
+		{
+			BFlushQuadBuffer();
+		}
+
+		// Check if the texture changed so we need to flush the buffer
+		if ( m_hLastTexture != hTexture )
+		{
+			BFlushQuadBuffer();
+		}	
+
+		// Save the texture to use for next flush
+		m_hLastTexture = hTexture;
+
+		// Lock the vertex buffer into memory
+		if ( !m_pQuadVertexes )
+		{
+			if ( !BLockEntireVertexBuffer( m_hQuadBuffer, (void**)&m_pQuadVertexes, m_dwQuadBufferBatchPos ? D3DLOCK_NOOVERWRITE : D3DLOCK_DISCARD ) )
+			{
+				m_pQuadVertexes = NULL;
+				OutputDebugString( "BDrawTexturedRect failed because locking vertex buffer failed\n" );
+				return false;
+			}
+		}
+
+		TexturedQuadVertex_t *pVertData = &m_pQuadVertexes[ m_dwQuadBufferBatchPos*4+m_dwQuadsToFlush*4 ];
+
+		#if GLMDEBUG && 0
+			GLMPRINTF(("-D- m_dwQuadBufferBatchPos = %d, m_dwQuadsToFlush = %d, net vertex index = %d(offset $%08x), m_pQuadVertexes is %08x, pVertData is %08x " ,
+				m_dwQuadBufferBatchPos,
+				m_dwQuadsToFlush,
+				m_dwQuadBufferBatchPos*4+m_dwQuadsToFlush*4,
+				(m_dwQuadBufferBatchPos*4+m_dwQuadsToFlush*4) * sizeof( m_pQuadVertexes[0] ),
+				m_pQuadVertexes,
+				pVertData
+				));
+		#endif
+		pVertData[0].color = dwColor;
+		pVertData[0].rhw = 1.0f;
+		pVertData[0].z = 1.0f;
+		pVertData[0].x = xPos0;
+		pVertData[0].y = yPos0;
+		pVertData[0].u = u0;
+		pVertData[0].v = v0;
+
+		pVertData[1].color = dwColor;
+		pVertData[1].rhw = 1.0f;
+		pVertData[1].z = 1.0f;
+		pVertData[1].x = xPos1;
+		pVertData[1].y = yPos1;
+		pVertData[1].u = u1;
+		pVertData[1].v = v0;
+
+		pVertData[2].color = dwColor;
+		pVertData[2].rhw = 1.0f;
+		pVertData[2].z = 1.0f;
+		pVertData[2].x = xPos2;
+		pVertData[2].y = yPos2;
+		pVertData[2].u = u0;
+		pVertData[2].v = v1;
+
+		pVertData[3].color = dwColor;
+		pVertData[3].rhw = 1.0f;
+		pVertData[3].z = 1.0f;
+		pVertData[3].x = xPos3;
+		pVertData[3].y = yPos3;
+		pVertData[3].u = u1;
+		pVertData[3].v = v1;
+
+		++m_dwQuadsToFlush;
+	#else
+		// Find the texture
+		std::map<HGAMETEXTURE, TextureData_t>::iterator iter;
+		iter = m_MapTextures.find( hTexture );
+		if ( iter == m_MapTextures.end() )
+		{
+			OutputDebugString( "BDrawTexturedQuad called with invalid hTexture value\n" );
+			return false;
+		}
+	
+		// Check if we are out of room and need to flush the buffer, or if our texture is changing
+		// then we also need to flush the buffer.
+		if ( m_dwQuadsToFlush == QUAD_BUFFER_TOTAL_SIZE || m_hLastTexture != hTexture )	
+		{
+			BFlushQuadBuffer();
+		}
+	
+		// Bind the new texture
+		glBindTexture( GL_TEXTURE_2D, iter->second.m_uTextureID );
+	
+		DWORD dwOffset = m_dwQuadsToFlush*12;
+		m_rgflQuadsData[dwOffset] = xPos0;
+		m_rgflQuadsData[dwOffset+1] = yPos0;
+		m_rgflQuadsData[dwOffset+2] = 1.0;
+		m_rgflQuadsData[dwOffset+3] = xPos1;
+		m_rgflQuadsData[dwOffset+4] = yPos1;
+		m_rgflQuadsData[dwOffset+5] = 1.0;
+		m_rgflQuadsData[dwOffset+6] = xPos2;
+		m_rgflQuadsData[dwOffset+7] = yPos2;
+		m_rgflQuadsData[dwOffset+8] = 1.0;
+		m_rgflQuadsData[dwOffset+9] = xPos3;
+		m_rgflQuadsData[dwOffset+10] = yPos3;
 		m_rgflQuadsData[dwOffset+11] = 1.0;
 	
 		dwOffset = m_dwQuadsToFlush*16;
@@ -1693,7 +1889,7 @@ bool CGameEngineGL::BFlushQuadBuffer()
 //-----------------------------------------------------------------------------
 // Purpose: Creates a new texture 
 //-----------------------------------------------------------------------------
-HGAMETEXTURE CGameEngineGL::HCreateTexture( byte *pRGBAData, uint32 uWidth, uint32 uHeight )
+HGAMETEXTURE CGameEngineGL::HCreateTexture( byte *pRGBAData, uint32 uWidth, uint32 uHeight, ETEXTUREFORMAT eTextureFormat )
 {
 	#if DX9MODE
 		if ( !m_pD3D9Device )
@@ -1732,7 +1928,7 @@ HGAMETEXTURE CGameEngineGL::HCreateTexture( byte *pRGBAData, uint32 uWidth, uint
 		glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 	
 		// build our texture mipmaps
-		glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, uWidth, uHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, (void *)pRGBAData );
+		glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, uWidth, uHeight, 0, eTextureFormat == eTextureFormat_RGBA ? GL_RGBA : GL_BGRA, GL_UNSIGNED_BYTE, (void *)pRGBAData );
 		glDisable( GL_TEXTURE_2D );
 	
 		int nHandle = m_nNextTextureHandle;
@@ -1741,6 +1937,39 @@ HGAMETEXTURE CGameEngineGL::HCreateTexture( byte *pRGBAData, uint32 uWidth, uint
 	
 		return nHandle;
 	#endif
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: update an exiting textue
+//-----------------------------------------------------------------------------
+bool CGameEngineGL::UpdateTexture( HGAMETEXTURE texture, byte *pRGBAData, uint32 uWidth, uint32 uHeight, ETEXTUREFORMAT eTextureFormat )
+{
+#if DX9MODE
+		
+	return false;
+#else
+	if ( m_bShuttingDown )
+		return false;
+	
+	std::map<HGAMETEXTURE, TextureData_t>::iterator iter;
+	iter = m_MapTextures.find( texture );
+	if ( iter == m_MapTextures.end() )
+	{
+		OutputDebugString( "BDrawTexturedQuad called with invalid hTexture value\n" );
+		return false;
+	}
+
+	glEnable( GL_TEXTURE_2D );
+	glBindTexture( GL_TEXTURE_2D, iter->second.m_uTextureID );
+	
+	// build our texture mipmaps
+	glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, uWidth, uHeight, 0, eTextureFormat == eTextureFormat_RGBA ? GL_RGBA : GL_BGRA, GL_UNSIGNED_BYTE, (void *)pRGBAData );
+	glDisable( GL_TEXTURE_2D );
+	
+	return true;
+#endif
+	
 }
 
 
@@ -1849,7 +2078,7 @@ bool CGameEngineGL::BDrawString( HGAMEFONT hFont, RECT rect, DWORD dwColor, DWOR
 			posx = stringleft + (7.0f * (float)charindex);
 			posy = stringtop;
 			
-			BDrawTexturedQuad( posx, posy, posx + 6.0f, posy + 11.0f, leftU, topV, rightU, bottomV, dwColor, font );		
+			BDrawTexturedRect( posx, posy, posx + 6.0f, posy + 11.0f, leftU, topV, rightU, bottomV, dwColor, font );		
 		}
 	
 	#else
@@ -1862,7 +2091,7 @@ bool CGameEngineGL::BDrawString( HGAMEFONT hFont, RECT rect, DWORD dwColor, DWOR
 		AutoReleasePool pool;
 		
 		NSFont *pFont = (NSFont*) m_MapGameFonts[ hFont ];
-		NSRect box = { { rect.left, rect.top }, { rect.right-rect.left, rect.bottom-rect.top } };
+		NSRect box = { { static_cast<CGFloat>(rect.left), static_cast<CGFloat>(rect.top) }, { static_cast<CGFloat>(rect.right-rect.left), static_cast<CGFloat>(rect.bottom-rect.top) } };
 		NSColor *pColor = [NSColor colorWithCalibratedRed:COLOR_RED(dwColor)/255.0
 													green:COLOR_GREEN(dwColor)/255.0
 													 blue:COLOR_BLUE(dwColor)/255.0
@@ -1907,10 +2136,10 @@ void CGameEngineGL::UpdateKey( uint32_t vkKey, int nDown )
 void CGameEngineGL::MessagePump()
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-	NSApplication *pApp = [NSApplication sharedApplication];
+	NSApplication *pApp = [GLApplication sharedApplication];
     do
     {
-        NSEvent *event = [pApp nextEventMatchingMask:NSAnyEventMask untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES];
+        NSEvent *event = [pApp nextEventMatchingMask:NSEventMaskAny untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES];
 		if ( event == nil )
 			break;
 		
@@ -1919,8 +2148,8 @@ void CGameEngineGL::MessagePump()
         uint32_t c = 0;
 		switch ( [event type] )
 		{
-			case NSKeyDown:
-			case NSKeyUp:
+			case NSEventTypeKeyDown:
+			case NSEventTypeKeyUp:
                 c = [[event charactersIgnoringModifiers] characterAtIndex:0];
             
                 switch ( c )
@@ -1944,19 +2173,21 @@ void CGameEngineGL::MessagePump()
                 
                 c = toupper(c);
                 
-                if ( [event type] == NSKeyDown )
+                if ( [event type] == NSEventTypeKeyDown )
                     m_SetKeysDown.insert( c );
                 else
                     m_SetKeysDown.erase( c );
 				continue;
             
-            case NSFlagsChanged:
+            case NSEventTypeFlagsChanged:
                 c = [event modifierFlags];
-                UpdateKey( VK_SHIFT, c & NSShiftKeyMask );
-                UpdateKey( VK_CONTROL, c & NSControlKeyMask );
-                UpdateKey( VK_SELECT, c & NSAlternateKeyMask );
+                UpdateKey( VK_SHIFT, c & NSEventModifierFlagShift );
+                UpdateKey( VK_CONTROL, c & NSEventModifierFlagControl );
+                UpdateKey( VK_SELECT, c & NSEventModifierFlagOption );
                 continue;
-            
+
+			default:
+				break;
 		}
 
         [pApp sendEvent:event];
@@ -2214,6 +2445,261 @@ void	CGameEngineGL::ShowPixels		( CShowPixelsParams *params )
 		[oldctx makeCurrentContext];
 	}
 }
-
 	
 #endif
+
+//-----------------------------------------------------------------------------
+// Purpose: Return true if there is an active Steam Controller
+//-----------------------------------------------------------------------------
+bool CGameEngineGL::BIsSteamInputDeviceActive( )
+{
+	if ( m_ActiveControllerHandle )
+	{
+		return true;
+	}
+
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Initialize the steam controller actions
+//-----------------------------------------------------------------------------
+void CGameEngineGL::InitSteamInput( )
+{
+	// Digital game actions
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_TurnLeft] = SteamInput()->GetDigitalActionHandle( "turn_left" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_TurnRight] = SteamInput()->GetDigitalActionHandle( "turn_right" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_ForwardThrust] = SteamInput()->GetDigitalActionHandle( "forward_thrust" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_ReverseThrust] = SteamInput()->GetDigitalActionHandle( "backward_thrust" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_FireLasers] = SteamInput()->GetDigitalActionHandle( "fire_lasers" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_PauseMenu] = SteamInput()->GetDigitalActionHandle( "pause_menu" );
+
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_MenuUp] = SteamInput()->GetDigitalActionHandle( "menu_up" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_MenuDown] = SteamInput()->GetDigitalActionHandle( "menu_down" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_MenuLeft] = SteamInput()->GetDigitalActionHandle( "menu_left" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_MenuRight] = SteamInput()->GetDigitalActionHandle( "menu_right" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_MenuSelect] = SteamInput()->GetDigitalActionHandle( "menu_select" );
+	m_ControllerDigitalActionHandles[eControllerDigitalAction_MenuCancel] = SteamInput()->GetDigitalActionHandle( "menu_cancel" );
+
+	// Analog game actions
+	m_ControllerAnalogActionHandles[eControllerAnalogAction_AnalogControls] = SteamInput()->GetAnalogActionHandle( "analog_controls" );
+
+	// Action set handles
+	m_ControllerActionSetHandles[eControllerActionSet_ShipControls] = SteamInput()->GetActionSetHandle( "ship_controls" );
+	m_ControllerActionSetHandles[eControllerActionSet_MenuControls] = SteamInput()->GetActionSetHandle( "menu_controls" );
+
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Find an active Steam controller
+//-----------------------------------------------------------------------------
+void CGameEngineGL::FindActiveSteamInputDevice( )
+{
+	// Use the first available steam controller for all interaction. We can call this each frame to handle
+	// a controller disconnecting and a different one reconnecting. Handles are guaranteed to be unique for
+	// a given controller, even across power cycles.
+
+	// See how many Steam Controllers are active. 
+	ControllerHandle_t pHandles[STEAM_CONTROLLER_MAX_COUNT];
+	int nNumActive = SteamInput()->GetConnectedControllers( pHandles );
+
+	// If there's an active controller, and if we're not already using it, select the first one.
+	if ( nNumActive && (m_ActiveControllerHandle != pHandles[0]) )
+	{
+		m_ActiveControllerHandle = pHandles[0];
+	}
+}
+
+
+//--------------------------------------------------------------------------------------------------------------
+// Purpose: For a given in-game action in a given action set, return a human-reaadable string to use as a prompt.
+//--------------------------------------------------------------------------------------------------------------
+const char *CGameEngineGL::GetTextStringForControllerOriginDigital( ECONTROLLERACTIONSET dwActionSet, ECONTROLLERDIGITALACTION dwDigitalAction )
+{
+	EInputActionOrigin origins[STEAM_CONTROLLER_MAX_ORIGINS];
+	int nNumOrigins = SteamInput()->GetDigitalActionOrigins( m_ActiveControllerHandle, m_ControllerActionSetHandles[dwActionSet], m_ControllerDigitalActionHandles[dwDigitalAction], origins );
+
+	if ( nNumOrigins )
+	{
+		// We should handle the case where this action is bound to multiple buttons, but
+		// here we just grab the first.
+		return SteamInput()->GetStringForActionOrigin( origins[0] );
+	}
+
+	return SteamInput()->GetStringForActionOrigin( k_EInputActionOrigin_None ); // Return "None"
+}
+
+//--------------------------------------------------------------------------------------------------------------
+// Purpose: For a given in-game action in a given action set, return a human-reaadable string to use as a prompt.
+//--------------------------------------------------------------------------------------------------------------
+const char *CGameEngineGL::GetTextStringForControllerOriginAnalog( ECONTROLLERACTIONSET dwActionSet, ECONTROLLERANALOGACTION dwDigitalAction )
+{
+	EInputActionOrigin origins[STEAM_CONTROLLER_MAX_ORIGINS];
+	int nNumOrigins = SteamInput()->GetAnalogActionOrigins( m_ActiveControllerHandle, m_ControllerActionSetHandles[dwActionSet], m_ControllerDigitalActionHandles[dwDigitalAction], origins );
+
+	if ( nNumOrigins )
+	{
+		// We should handle the case where this action is bound to multiple buttons, but
+		// here we just grab the first.
+		return SteamInput()->GetStringForActionOrigin( origins[0] );
+	}
+
+	return SteamInput()->GetStringForActionOrigin( k_EInputActionOrigin_None ); // Return "None"
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Called each frame
+//-----------------------------------------------------------------------------
+void CGameEngineGL::PollSteamInput( )
+{
+	// There's a bug where the action handles aren't non-zero until a config is done loading. Soon config
+	// information will be available immediately. Until then try to init as long as the handles are invalid.
+	if ( m_ControllerDigitalActionHandles[eControllerDigitalAction_TurnLeft] == 0 )
+	{
+		InitSteamInput( );
+		return;
+	}
+
+	// Each frame check our active controller handle
+	FindActiveSteamInputDevice( );
+
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Set the LED color on the controller, if supported by controller
+//-----------------------------------------------------------------------------
+void CGameEngineGL::SetControllerColor( uint8 nColorR, uint8 nColorG, uint8 nColorB, unsigned int nFlags )
+{
+	SteamInput()->SetLEDColor( m_ActiveControllerHandle, nColorR, nColorG, nColorB, nFlags );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Set the trigger effect on DualSense controllers
+//-----------------------------------------------------------------------------
+void CGameEngineGL::SetTriggerEffect( bool bEnabled )
+{
+	ScePadTriggerEffectParam param;
+
+	memset( &param, 0, sizeof( param ) );
+	param.triggerMask = SCE_PAD_TRIGGER_EFFECT_TRIGGER_MASK_R2;
+
+	// Clear any existing effect
+	param.command[ SCE_PAD_TRIGGER_EFFECT_PARAM_INDEX_FOR_R2 ].mode = SCE_PAD_TRIGGER_EFFECT_MODE_OFF;
+	SteamInput()->SetDualSenseTriggerEffect( m_ActiveControllerHandle, &param );
+
+	if ( bEnabled )
+	{
+		param.command[ SCE_PAD_TRIGGER_EFFECT_PARAM_INDEX_FOR_R2 ].mode = SCE_PAD_TRIGGER_EFFECT_MODE_VIBRATION;
+		param.command[ SCE_PAD_TRIGGER_EFFECT_PARAM_INDEX_FOR_R2 ].commandData.vibrationParam.position = 5;
+		param.command[ SCE_PAD_TRIGGER_EFFECT_PARAM_INDEX_FOR_R2 ].commandData.vibrationParam.amplitude = 5;
+		param.command[ SCE_PAD_TRIGGER_EFFECT_PARAM_INDEX_FOR_R2 ].commandData.vibrationParam.frequency = 8;
+		SteamInput()->SetDualSenseTriggerEffect( m_ActiveControllerHandle, &param );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Trigger vibration on the controller, if supported by controller
+//-----------------------------------------------------------------------------
+void CGameEngineGL::TriggerControllerVibration( unsigned short nLeftSpeed, unsigned short nRightSpeed )
+{
+	SteamInput()->TriggerVibration( m_ActiveControllerHandle, nLeftSpeed, nRightSpeed );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Trigger haptics on the controller, if supported by controller
+//-----------------------------------------------------------------------------
+void CGameEngineGL::TriggerControllerHaptics( ESteamControllerPad ePad, unsigned short usOnMicroSec, unsigned short usOffMicroSec, unsigned short usRepeat )
+{
+	SteamInput()->Legacy_TriggerRepeatedHapticPulse( m_ActiveControllerHandle, ePad, usOnMicroSec, usOffMicroSec, usRepeat, 0 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Find out if a controller event is currently active
+//-----------------------------------------------------------------------------
+bool CGameEngineGL::BIsControllerActionActive( ECONTROLLERDIGITALACTION dwAction )
+{
+	ControllerDigitalActionData_t digitalData = SteamInput()->GetDigitalActionData( m_ActiveControllerHandle, m_ControllerDigitalActionHandles[dwAction] );
+
+	// Actions are only 'active' when they're assigned to a control in an action set, and that action set is active.
+	if ( digitalData.bActive )
+		return digitalData.bState;
+	
+	return false;
+}
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------
+// Purpose: Get the current x,y state of the analog action. Examples of an analog action are a virtual joystick on the trackpad or the real joystick.
+//---------------------------------------------------------------------------------------------------------------------------------------------------
+void CGameEngineGL::GetControllerAnalogAction( ECONTROLLERANALOGACTION dwAction, float *x, float *y )
+{
+	ControllerAnalogActionData_t analogData = SteamInput()->GetAnalogActionData( m_ActiveControllerHandle, m_ControllerAnalogActionHandles[dwAction] );
+
+	// Actions are only 'active' when they're assigned to a control in an action set, and that action set is active.
+	if ( analogData.bActive )
+	{
+		*x = analogData.x;
+		*y = analogData.y;
+	}
+	else
+	{
+		*x = 0.0f;
+		*y = 0.0f;
+	}
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+// Purpose: Put the controller into a specific action set. Action sets are collections of game-context actions ie "walking", "flying" or "menu"
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+void CGameEngineGL::SetSteamControllerActionSet( ECONTROLLERACTIONSET dwActionSet )
+{
+	if ( m_ActiveControllerHandle == 0 )
+		return;
+
+	// This call is low-overhead and can be called repeatedly from game code that is active in a specific mode.
+	SteamInput()->ActivateActionSet( m_ActiveControllerHandle, m_ControllerActionSetHandles[dwActionSet] );
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+// Purpose: Put the controller into a specific action set layer. Action sets layers apply modifications to an existing action set.
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+void CGameEngineGL::ActivateSteamControllerActionSetLayer( ECONTROLLERACTIONSET dwActionSetLayer )
+{
+	if ( m_ActiveControllerHandle == 0 )
+		return;
+
+	// This call is low-overhead and can be called repeatedly from game code that is active in a specific mode.
+	SteamInput()->ActivateActionSetLayer( m_ActiveControllerHandle, m_ControllerActionSetHandles[ dwActionSetLayer ] );
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+// Purpose: Deactivate an existing action set layer
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+void CGameEngineGL::DeactivateSteamControllerActionSetLayer( ECONTROLLERACTIONSET dwActionSetLayer )
+{
+	if ( m_ActiveControllerHandle == 0 )
+		return;
+
+	// This call is low-overhead and can be called repeatedly from game code that is active in a specific mode.
+	SteamInput()->DeactivateActionSetLayer( m_ActiveControllerHandle, m_ControllerActionSetHandles[ dwActionSetLayer ] );
+}
+
+
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+// Purpose: Determine whether an action set layer is currently active
+//-----------------------------------------------------------------------------------------------------------------------------------------------------
+bool CGameEngineGL::BIsActionSetLayerActive( ECONTROLLERACTIONSET dwActionSetLayer )
+{
+	if ( m_ActiveControllerHandle == 0 )
+		return false;
+
+	ControllerActionSetHandle_t pActionSetLayerHandles[ 32 ];
+	int nActiveLayerCount = SteamInput()->GetActiveActionSetLayers( m_ActiveControllerHandle, pActionSetLayerHandles );
+
+	for ( int i = 0; i < nActiveLayerCount; i++ )
+	{
+		if ( pActionSetLayerHandles[ i ] == m_ControllerActionSetHandles[ dwActionSetLayer ] )
+			return true;
+	}
+
+	return false;
+}

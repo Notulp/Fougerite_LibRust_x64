@@ -10,6 +10,7 @@
 
 #include "SpaceWar.h"
 #include "GameEngine.h"
+#include "Inventory.h"
 
 enum EAchievements
 {
@@ -39,7 +40,7 @@ public:
 	// Constructor
 	CStatsAndAchievements( IGameEngine *pGameEngine );
 
-	// Run a frame
+	// Run a frame. Does not need to run at full frame rate.
 	void RunFrame();
 
 	// Display the stats and achievements
@@ -55,13 +56,12 @@ public:
 	float GetGameFeetTraveled() { return m_flGameFeetTraveled; }
 	double GetGameDurationSeconds() { return m_flGameDurationSeconds; }
 
-	STEAM_CALLBACK( CStatsAndAchievements, OnUserStatsReceived, UserStatsReceived_t, m_CallbackUserStatsReceived );
 	STEAM_CALLBACK( CStatsAndAchievements, OnUserStatsStored, UserStatsStored_t, m_CallbackUserStatsStored );
 	STEAM_CALLBACK( CStatsAndAchievements, OnAchievementStored, UserAchievementStored_t, m_CallbackAchievementStored );
-	STEAM_CALLBACK( CStatsAndAchievements, OnPS3TrophiesInstalled, PS3TrophiesInstalled_t, m_CallbackPS3TrophiesInstalled );
 	
-
 private:
+
+	void LoadUserStats();
 
 	// Determine if we get this achievement now
 	void EvaluateAchievement( Achievement_t &achievement );
@@ -73,10 +73,7 @@ private:
 	// Render helpers
 	void DrawAchievementInfo( RECT &rect, Achievement_t &ach );
 	void DrawStatInfo( RECT &rect, const char *pchName, float flValue );
-
-	// PS3 specific
-	bool LoadUserStatsOnPS3();
-	bool SaveUserStatsOnPS3();
+	void DrawInventory( RECT &rect, SteamItemInstanceID_t itemid );
 
 	// our GameID
 	CGameID m_GameID;
@@ -94,7 +91,6 @@ private:
 	HGAMEFONT m_hDisplayFont;
 
 	// Did we get the stats from Steam?
-	bool m_bRequestedStats;
 	bool m_bStatsValid;
 
 	// Should we store stats this frame?
@@ -112,10 +108,6 @@ private:
 	float m_flTotalFeetTraveled;
 	float m_flMaxFeetTraveled;
 	float m_flAverageSpeed;
-
-	// PS3 specific
-	bool m_bStartedPS3TrophyInstall;
-	bool m_bInstalledPS3Trophies;
 };
 
 #endif // STATS_AND_ACHIEVEMENTS_H

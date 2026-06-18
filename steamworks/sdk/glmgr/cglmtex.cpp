@@ -8,6 +8,15 @@
 #include "cglmtex.h"
 #include "dxabstract.h"
 
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wunused-variable"
+#endif
+
+#ifdef OSX
+// Debugger - 10.8
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 //===============================================================================
 
 #define TEXSPACE_LOGGING 0
@@ -413,11 +422,11 @@ GLMTexLayout *CGLMTexLayoutTable::NewLayoutRef( GLMTexLayoutKey *key )
 	// if not, generate a completed layout based on the key, add to map, set refcount to 1, return that
 	
 	const GLMTexFormatDesc	*formatDesc = GetFormatDesc( key->m_texFormat );
-	bool					compression = (formatDesc->m_chunkSize > 1);
 	if (!formatDesc)
 	{
 		GLMStop();	// bad news
 	}
+	bool					compression = (formatDesc->m_chunkSize > 1);
 	
 	GLMTexLayoutKeyMap::iterator p = m_layoutMap.find( *key );
 	if (p != m_layoutMap.end())
@@ -564,7 +573,7 @@ GLMTexLayout *CGLMTexLayoutTable::NewLayoutRef( GLMTexLayoutKey *key )
 		// "target, format, +/- mips, base size"
 		char scratch[1024];
 
-		char	*targetname;
+		const char	*targetname;
 		switch( key->m_texGLTarget )
 		{
 			case GL_TEXTURE_2D:			targetname = "2D  ";		break;
@@ -634,7 +643,7 @@ void CGLMTexLayoutTable::DumpStats( )
 #endif
 
 
-CGLMTex::CGLMTex( GLMContext *ctx, GLMTexLayout *layout, GLMTexSamplingParams *sampling, char *debugLabel )
+CGLMTex::CGLMTex( GLMContext *ctx, GLMTexLayout *layout, GLMTexSamplingParams *sampling, const char *debugLabel )
 {
 	// caller has responsibility to make 'ctx' current, but we check to be sure.
 	ctx->CheckCurrent();
@@ -1184,6 +1193,9 @@ void CGLMTex::WriteTexels( GLMTexLockDesc *desc, bool writeWholeSlice, bool noDa
 			m_texClientStorage = false;
 		}
 		break;
+
+		default:
+		break;
 	}
 	
 	if (writeWholeSlice)
@@ -1229,7 +1241,7 @@ void CGLMTex::WriteTexels( GLMTexLockDesc *desc, bool writeWholeSlice, bool noDa
 	// (mechanism not policy)
 	
 	GLenum intformat = (m_layout->m_key.m_texFlags & kGLMTexSRGB) ? format->m_glIntFormatSRGB : format->m_glIntFormat;
-	if (0 /* CommandLine()->FindParm("-disable_srgbtex") */)
+	if ( ( 0 ) /* CommandLine()->FindParm("-disable_srgbtex") */)
 	{
 		// force non srgb flavor - experiment to make ATI r600 happy on 10.5.8 (maybe x1600 too!)
 		intformat = format->m_glIntFormat;
