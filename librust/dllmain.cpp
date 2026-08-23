@@ -552,6 +552,8 @@ EXPORT bool Steam_ServerStartup(int port, int protocol)
         SteamGameServer()->SetModDir("rust");
         SteamGameServer()->SetProduct("rust");
         SteamGameServer()->SetGameDescription("Rust Legacy x64");
+        SteamGameServer()->SetDedicatedServer(true);
+        SteamGameServer()->SetAdvertiseServerActive(true);
         SteamGameServer()->LogOnAnonymous();
         std::cout << "[Fougerite LibRust x64] SteamGameServer Initialized with Protocol " << versionString << " successfully.\n";
     }
@@ -564,6 +566,12 @@ EXPORT bool Steam_ServerStartup(int port, int protocol)
 
 EXPORT void Steam_ServerShutdown()
 {
+    if (SteamGameServer())
+    {
+        SteamGameServer()->SetAdvertiseServerActive(false);
+        SteamGameServer()->LogOff();
+    }
+    
     if (g_pCallbacks)
     {
         delete g_pCallbacks;
@@ -580,7 +588,11 @@ EXPORT void Steam_UpdateServer(int maxplayers, int icurrentplayers, const char* 
         SteamGameServer()->SetMaxPlayerCount(maxplayers);
         SteamGameServer()->SetMapName(strMapName);
         SteamGameServer()->SetServerName(strServerName);
-        SteamGameServer()->SetGameTags(strTags);
+        
+        std::string customTags = strTags ? strTags : "";
+        if (!customTags.empty()) customTags += ",";
+        customTags += "rb_community_secret";
+        SteamGameServer()->SetGameTags(customTags.c_str());
     }
 }
 
