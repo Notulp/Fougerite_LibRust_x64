@@ -232,6 +232,16 @@ void ParseCfgFile(const std::string& filePath)
     }
 }
 
+static std::string g_DynamicTag = "";
+
+EXPORT void SetCommunityTag(const char* tag)
+{
+    if (tag)
+        g_DynamicTag = tag;
+    else
+        g_DynamicTag = "";
+}
+
 EXPORT int Initialize(char** args, int numargs)
 {
     if (!AttachConsole(ATTACH_PARENT_PROCESS))
@@ -590,8 +600,21 @@ EXPORT void Steam_UpdateServer(int maxplayers, int icurrentplayers, const char* 
         SteamGameServer()->SetServerName(strServerName);
         
         std::string customTags = strTags ? strTags : "";
-        if (!customTags.empty()) customTags += ",";
-        customTags += "rb_community_secret";
+        if (!g_DynamicTag.empty())
+        {
+            std::string toAppend = (customTags.empty() ? "" : ",") + g_DynamicTag;
+            if (customTags.length() + toAppend.length() > 127)
+            {
+                customTags = customTags.substr(0, 127 - toAppend.length());
+            }
+            
+            customTags += toAppend;
+        }
+        else if (customTags.length() > 127)
+        {
+            customTags = customTags.substr(0, 127);
+        }
+        
         SteamGameServer()->SetGameTags(customTags.c_str());
     }
 }
