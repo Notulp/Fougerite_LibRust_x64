@@ -49,7 +49,6 @@ std::recursive_mutex g_RconCaptureMutex;
 bool g_IsRunning = false;
 bool g_WantToClose = false;
 bool g_AllowCloseGranted = false;
-bool g_AllowSpacewar = false;
 char g_ReturnBuffer[4096] = {0};
 
 struct RconTask
@@ -63,9 +62,6 @@ struct RconTask
 
 std::queue<std::shared_ptr<RconTask>> g_RconTaskQueue;
 std::mutex g_RconTaskMutex;
-
-std::unordered_set<uint64_t> g_VerifiedSteamUsers;
-std::mutex g_VerifiedUsersMutex;
 
 class CSteamCallbacks
 {
@@ -87,20 +83,6 @@ void CSteamCallbacks::OnAuthTicketResponse(ValidateAuthTicketResponse_t* pParam)
 {
     uint64_t steamID = pParam->m_SteamID.ConvertToUint64();
 
-    // k_EAuthSessionResponseOK = 0 (Same AppID)
-    // k_EAuthSessionResponseNoLicenseOrExpired = 2 (AppID 480 mismatch, but cryptographically valid Valve ticket)
-    if (pParam->m_eAuthSessionResponse == k_EAuthSessionResponseOK ||
-        pParam->m_eAuthSessionResponse == k_EAuthSessionResponseNoLicenseOrExpired)
-    {
-        std::lock_guard<std::mutex> lock(g_VerifiedUsersMutex);
-        g_VerifiedSteamUsers.insert(steamID);
-    }
-    else
-    {
-        std::lock_guard<std::mutex> lock(g_VerifiedUsersMutex);
-        g_VerifiedSteamUsers.erase(steamID);
-    }
-
     if (g_UserAuth)
     {
         const char* status = "failed";
@@ -113,7 +95,7 @@ void CSteamCallbacks::OnAuthTicketResponse(ValidateAuthTicketResponse_t* pParam)
             status = "noconnect"; 
             break;
         case k_EAuthSessionResponseNoLicenseOrExpired: 
-            status = g_AllowSpacewar ? "ok" : "no license";
+            status = "no license";
             break;
         case k_EAuthSessionResponseVACBanned: 
             status = "vac"; 
@@ -659,11 +641,6 @@ EXPORT void SteamServer_SetCallback_UserGroup(funcUserGroup fnc)
     g_UserGroup = fnc;
 }
 
-EXPORT void SteamServer_SetAllowSpacewar(bool bAllow)
-{
-    g_AllowSpacewar = bAllow;
-}
-
 EXPORT const char* SteamServer_BeginAuthSession(void* pData, int iDataSize, uint64_t iUserID)
 {
     if (!SteamGameServer()) return "failed";
@@ -676,7 +653,7 @@ EXPORT const char* SteamServer_BeginAuthSession(void* pData, int iDataSize, uint
     case k_EBeginAuthSessionResultOK: 
         return "ok";
     case k_EBeginAuthSessionResultGameMismatch:
-        return g_AllowSpacewar ? "ok" : "game mismatch";
+        return "game mismatch";
     case k_EBeginAuthSessionResultInvalidTicket: 
         return "invalid ticket";
     case k_EBeginAuthSessionResultDuplicateRequest: 
@@ -687,12 +664,6 @@ EXPORT const char* SteamServer_BeginAuthSession(void* pData, int iDataSize, uint
         return "expired ticket";
     }
     return "failed";
-}
-
-EXPORT bool SteamServer_IsSteamUser(uint64_t iUserID)
-{
-    std::lock_guard<std::mutex> lock(g_VerifiedUsersMutex);
-    return g_VerifiedSteamUsers.find(iUserID) != g_VerifiedSteamUsers.end();
 }
 
 EXPORT bool SteamServer_UserGroupStatus(uint64_t iUserID, uint64_t iGroupID)
@@ -710,9 +681,6 @@ EXPORT void SteamServer_UserLeave(uint64_t iUserID)
     {
         SteamGameServer()->EndAuthSession(CSteamID(iUserID));
     }
-    
-    std::lock_guard<std::mutex> lock(g_VerifiedUsersMutex);
-    g_VerifiedSteamUsers.erase(iUserID);
 }
 
 EXPORT uint64_t SteamServer_GetSteamID()
