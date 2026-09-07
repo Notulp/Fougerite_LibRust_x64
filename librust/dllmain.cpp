@@ -63,6 +63,9 @@ struct RconTask
 std::queue<std::shared_ptr<RconTask>> g_RconTaskQueue;
 std::mutex g_RconTaskMutex;
 
+std::unordered_set<uint64_t> g_MismatchedPlayers;
+std::mutex g_MismatchedPlayersMutex;
+
 class CSteamCallbacks
 {
 public:
@@ -653,6 +656,11 @@ EXPORT const char* SteamServer_BeginAuthSession(void* pData, int iDataSize, uint
     case k_EBeginAuthSessionResultOK: 
         return "ok";
     case k_EBeginAuthSessionResultGameMismatch:
+        {
+            std::lock_guard<std::mutex> lock(g_MismatchedPlayersMutex);
+            g_MismatchedPlayers.insert(iUserID);
+            SteamGameServer()->SetBotPlayerCount((int)g_MismatchedPlayers.size());
+        }
         return "game mismatch";
     case k_EBeginAuthSessionResultInvalidTicket: 
         return "invalid ticket";
@@ -680,6 +688,12 @@ EXPORT void SteamServer_UserLeave(uint64_t iUserID)
     if (SteamGameServer())
     {
         SteamGameServer()->EndAuthSession(CSteamID(iUserID));
+
+        std::lock_guard<std::mutex> lock(g_MismatchedPlayersMutex);
+        if (g_MismatchedPlayers.erase(iUserID))
+        {
+            SteamGameServer()->SetBotPlayerCount((int)g_MismatchedPlayers.size());
+        }
     }
 }
 
